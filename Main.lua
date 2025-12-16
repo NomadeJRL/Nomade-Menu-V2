@@ -1,39 +1,43 @@
 --[[
-    NOMADE MENU V2 - MAIN LOGIC
-    Usage: loadstring(game:HttpGet("LINK_DO_LOADER"))()
+    NOMADE MENU V2 - MAIN SCRIPT
+    Este script contém toda a lógica dos cheats.
 ]]
 
--- !!! IMPORTANTE: Substitua o link abaixo pelo seu link RAW do Library.lua no GitHub !!!
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/SEU_USUARIO/NomadeV2/main/Library.lua"))()
+-- AQUI ESTÁ O SEGREDO: Carregando a Library do SEU GitHub (Link Limpo)
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/NomadeJRL/Nomade-Menu-V2/main/Library.lua"))()
 
+-- Criando a Janela
 local Window = Library:CreateWindow({Title = "Nomade V2 | Ultimate"})
 
--- Serviços e Variáveis
+-- Serviços
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
 
--- == TABS ==
+-- == CRIANDO AS ABAS ==
 local Combat = Window:Tab("Combat")
 local Visuals = Window:Tab("Visuals")
 local Movement = Window:Tab("Movement")
 local World = Window:Tab("World")
 local Misc = Window:Tab("Misc")
 
--- == COMBAT FEATURES ==
-Combat:Label("--- Aimbot & Assist ---")
+-- == COMBAT (COMBATE) ==
+Combat:Label("--- Mira & Ataque ---")
 
-local AimbotEnabled = false
+local AimbotOn = false
 Combat:Toggle("Aimbot (Head Lock)", false, function(state)
-    AimbotEnabled = state
+    AimbotOn = state
 end)
 
+-- Lógica do Aimbot
 RunService.RenderStepped:Connect(function()
-    if AimbotEnabled then
+    if AimbotOn then
         local closest = nil
-        local dist = 200 -- FOV
+        local dist = 250 -- Campo de visão (FOV)
         for _, v in pairs(Players:GetPlayers()) do
             if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("Head") then
                 local pos, vis = Camera:WorldToViewportPoint(v.Character.Head.Position)
@@ -43,13 +47,15 @@ RunService.RenderStepped:Connect(function()
                 end
             end
         end
-        if closest then Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position) end
+        if closest then 
+            TweenService:Create(Camera, TweenInfo.new(0.05), {CFrame = CFrame.new(Camera.CFrame.Position, closest.Position)}):Play()
+        end
     end
 end)
 
 Combat:Toggle("TriggerBot", false, function(state)
-    getgenv().TriggerBot = state
-    while getgenv().TriggerBot do
+    getgenv().Trigger = state
+    while getgenv().Trigger do
         wait()
         if Mouse.Target and Mouse.Target.Parent:FindFirstChild("Humanoid") then
             mouse1click()
@@ -57,29 +63,31 @@ Combat:Toggle("TriggerBot", false, function(state)
     end
 end)
 
-Combat:Button("Silent Aim (Hitbox Expander)", function()
+Combat:Button("Silent Aim (Hitbox)", function()
     for _, v in pairs(Players:GetPlayers()) do
         if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
             v.Character.HumanoidRootPart.Size = Vector3.new(10,10,10)
             v.Character.HumanoidRootPart.Transparency = 0.7
             v.Character.HumanoidRootPart.CanCollide = false
+            v.Character.HumanoidRootPart.Color = Color3.fromRGB(255,0,0)
         end
     end
 end)
 
--- == VISUALS FEATURES ==
+-- == VISUALS (VISUAIS) ==
 Visuals:Label("--- ESP & Render ---")
 
-Visuals:Toggle("ESP Box (Wallhack)", false, function(state)
+Visuals:Toggle("ESP Box", false, function(state)
     if state then
-        -- Simples Highlight ESP
         for _, v in pairs(Players:GetPlayers()) do
             if v ~= LocalPlayer and v.Character then
-                local hl = Instance.new("Highlight")
-                hl.Name = "NomadeESP"
-                hl.FillTransparency = 1
-                hl.OutlineColor = Color3.fromRGB(255, 0, 0)
-                hl.Parent = v.Character
+                if not v.Character:FindFirstChild("NomadeESP") then
+                    local hl = Instance.new("Highlight")
+                    hl.Name = "NomadeESP"
+                    hl.FillTransparency = 1
+                    hl.OutlineColor = Color3.fromRGB(255, 50, 50)
+                    hl.Parent = v.Character
+                end
             end
         end
     else
@@ -89,39 +97,41 @@ Visuals:Toggle("ESP Box (Wallhack)", false, function(state)
     end
 end)
 
-Visuals:Toggle("Chams (Fill)", false, function(state)
+Visuals:Toggle("Chams (Glow)", false, function(state)
     if state then
         for _, v in pairs(Players:GetPlayers()) do
             if v ~= LocalPlayer and v.Character then
-                local hl = Instance.new("Highlight")
-                hl.Name = "NomadeChams"
-                hl.FillColor = Color3.fromRGB(255, 0, 0)
-                hl.OutlineTransparency = 1
-                hl.Parent = v.Character
+                if not v.Character:FindFirstChild("NomadeCham") then
+                    local hl = Instance.new("Highlight")
+                    hl.Name = "NomadeCham"
+                    hl.FillColor = Color3.fromRGB(255, 0, 0)
+                    hl.OutlineTransparency = 1
+                    hl.Parent = v.Character
+                end
             end
         end
     else
         for _, v in pairs(workspace:GetDescendants()) do
-            if v.Name == "NomadeChams" then v:Destroy() end
+            if v.Name == "NomadeCham" then v:Destroy() end
         end
     end
 end)
 
-Visuals:Button("Fullbright (Light)", function()
-    game.Lighting.Brightness = 2
-    game.Lighting.ClockTime = 14
-    game.Lighting.FogEnd = 100000
-    game.Lighting.GlobalShadows = false
+Visuals:Button("Fullbright (Luz)", function()
+    Lighting.Brightness = 2
+    Lighting.ClockTime = 14
+    Lighting.FogEnd = 100000
+    Lighting.GlobalShadows = false
 end)
 
--- == MOVEMENT FEATURES ==
-Movement:Label("--- Physics Bypass ---")
+-- == MOVEMENT (MOVIMENTAÇÃO) ==
+Movement:Label("--- Velocidade & Pulo ---")
 
-local SpeedEnabled = false
+local SpeedOn = false
 Movement:Toggle("CFrame Speed (Bypass)", false, function(state)
-    SpeedEnabled = state
+    SpeedOn = state
     RunService.RenderStepped:Connect(function()
-        if SpeedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        if SpeedOn and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
             if LocalPlayer.Character.Humanoid.MoveDirection.Magnitude > 0 then
                 LocalPlayer.Character.HumanoidRootPart.CFrame = LocalPlayer.Character.HumanoidRootPart.CFrame + (LocalPlayer.Character.Humanoid.MoveDirection * 0.5)
             end
@@ -135,8 +145,18 @@ Movement:Toggle("Infinite Jump", false, function(state)
     end)
 end)
 
-Movement:Button("Fly (Press F)", function()
-    -- Script de fly simples
+Movement:Toggle("Noclip", false, function(state)
+    getgenv().Noclip = state
+    RunService.Stepped:Connect(function()
+        if getgenv().Noclip and LocalPlayer.Character then
+            for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+                if v:IsA("BasePart") then v.CanCollide = false end
+            end
+        end
+    end)
+end)
+
+Movement:Button("Fly (Tecla F)", function()
     local mouse = LocalPlayer:GetMouse()
     mouse.KeyDown:Connect(function(k)
         if k:lower() == "f" then
@@ -151,37 +171,33 @@ Movement:Button("Fly (Press F)", function()
     end)
 end)
 
--- == WORLD FEATURES ==
+-- == WORLD (MUNDO) ==
 World:Toggle("Low Gravity", false, function(state)
     workspace.Gravity = state and 50 or 196.2
 end)
 
-World:Button("Click TP (Ctrl+Click)", function()
+World:Toggle("SpinBot", false, function(state)
+    getgenv().Spin = state
+    while getgenv().Spin do
+        RunService.RenderStepped:Wait()
+        if LocalPlayer.Character then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = LocalPlayer.Character.HumanoidRootPart.CFrame * CFrame.Angles(0, math.rad(20), 0)
+        end
+    end
+end)
+
+World:Button("Click TP (Ctrl + Click)", function()
     local mouse = LocalPlayer:GetMouse()
     mouse.Button1Down:Connect(function()
-        if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.LeftControl) then
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
             LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(mouse.Hit.p + Vector3.new(0,3,0))
         end
     end)
 end)
 
-World:Button("Delete Map (FPS)", function()
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") then
-            v.Transparency = 1
-            v.CanCollide = false
-        end
-    end
-end)
-
--- == MISC FEATURES ==
+-- == MISC (OUTROS) ==
 Misc:Button("Rejoin Server", function()
     game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
-end)
-
-Misc:Button("Server Hop", function()
-    -- Função complexa de HttpGet para achar servidores
-    print("Server Hopping...")
 end)
 
 Misc:Button("Destroy UI", function()
