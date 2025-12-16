@@ -1,6 +1,6 @@
 --[[
-    ZENITH LIBRARY V2 (REFORGED)
-    Fixes: Slider Drag Bug, Better Animations, Icons
+    ZENITH LIBRARY V3 (ULTIMATE)
+    Updates: Icon Support, Drawing API Helper, Optimized Drag
 ]]
 
 local TweenService = game:GetService("TweenService")
@@ -8,57 +8,77 @@ local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-local Mouse = Players.LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
 
 local Library = {}
 
 local Styles = {
-    Main     = Color3.fromRGB(15, 15, 20),
-    Sidebar  = Color3.fromRGB(10, 10, 12),
-    Section  = Color3.fromRGB(25, 25, 30),
-    Accent   = Color3.fromRGB(140, 100, 255), -- Roxo Zenith
+    Main     = Color3.fromRGB(18, 18, 22),
+    Sidebar  = Color3.fromRGB(13, 13, 15),
+    Section  = Color3.fromRGB(24, 24, 28),
+    Accent   = Color3.fromRGB(140, 100, 255), -- Roxo Real
     Text     = Color3.fromRGB(245, 245, 255),
     TextDim  = Color3.fromRGB(140, 140, 150),
-    Outline  = Color3.fromRGB(40, 40, 45)
+    Outline  = Color3.fromRGB(45, 45, 50)
 }
 
 function Library:Tween(obj, props, time)
-    TweenService:Create(obj, TweenInfo.new(time or 0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), props):Play()
+    TweenService:Create(obj, TweenInfo.new(time or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+end
+
+-- Função para desenhar linhas (Usada no Skeleton/Tracers)
+function Library:DrawLine(Folder, P1, P2, Color, Thickness)
+    local Line = Instance.new("Frame")
+    Line.Name = "Line"
+    Line.AnchorPoint = Vector2.new(0.5, 0.5)
+    Line.BorderSizePixel = 0
+    Line.BackgroundColor3 = Color or Styles.Accent
+    Line.Parent = Folder
+
+    local Dist = (Vector2.new(P1.X, P1.Y) - Vector2.new(P2.X, P2.Y)).Magnitude
+    local Center = (Vector2.new(P1.X, P1.Y) + Vector2.new(P2.X, P2.Y)) / 2
+    local Rot = math.atan2(P2.Y - P1.Y, P2.X - P1.X)
+
+    Line.Size = UDim2.new(0, Dist, 0, Thickness or 1)
+    Line.Position = UDim2.new(0, Center.X, 0, Center.Y)
+    Line.Rotation = math.deg(Rot)
+    return Line
 end
 
 function Library:Init(Config)
     for _, v in pairs(CoreGui:GetDescendants()) do
-        if v.Name == "ZenithReforged" then v:Destroy() end
+        if v.Name == "ZenithV3" then v:Destroy() end
     end
 
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "ZenithReforged"
+    ScreenGui.Name = "ZenithV3"
     ScreenGui.Parent = CoreGui
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.IgnoreGuiInset = true
 
     -- Main Window
     local Main = Instance.new("Frame")
     Main.Name = "Main"
-    Main.Size = UDim2.new(0, 0, 0, 0) -- Anim
+    Main.Size = UDim2.new(0, 0, 0, 0)
     Main.Position = UDim2.new(0.5, 0, 0.5, 0)
     Main.AnchorPoint = Vector2.new(0.5, 0.5)
     Main.BackgroundColor3 = Styles.Main
     Main.ClipsDescendants = true
     Main.Parent = ScreenGui
 
-    local MCorner = Instance.new("UICorner") MCorner.CornerRadius = UDim.new(0, 10) MCorner.Parent = Main
+    local MCorner = Instance.new("UICorner") MCorner.CornerRadius = UDim.new(0, 8) MCorner.Parent = Main
     local MStroke = Instance.new("UIStroke") MStroke.Color = Styles.Outline MStroke.Thickness = 1 MStroke.Parent = Main
 
-    Library:Tween(Main, {Size = UDim2.new(0, 750, 0, 480)}, 0.5)
+    Library:Tween(Main, {Size = UDim2.new(0, 750, 0, 480)}, 0.6)
 
-    -- Sidebar (Drag Area)
+    -- Sidebar
     local Sidebar = Instance.new("Frame")
     Sidebar.Size = UDim2.new(0, 200, 1, 0)
     Sidebar.BackgroundColor3 = Styles.Sidebar
     Sidebar.BorderSizePixel = 0
     Sidebar.Parent = Main
     
-    local SCorner = Instance.new("UICorner") SCorner.CornerRadius = UDim.new(0, 10) SCorner.Parent = Sidebar
+    local SCorner = Instance.new("UICorner") SCorner.CornerRadius = UDim.new(0, 8) SCorner.Parent = Sidebar
     local SFix = Instance.new("Frame") SFix.Size=UDim2.new(0,10,1,0) SFix.Position=UDim2.new(1,-10,0,0) SFix.BackgroundColor3=Styles.Sidebar SFix.BorderSizePixel=0 SFix.Parent=Sidebar
 
     -- Logo
@@ -72,7 +92,7 @@ function Library:Init(Config)
     Logo.Parent = Sidebar
 
     local LogoSub = Instance.new("TextLabel")
-    LogoSub.Text = "V2 // PREMIUM"
+    LogoSub.Text = "ESP SUITE"
     LogoSub.Font = Enum.Font.Code
     LogoSub.TextSize = 10
     LogoSub.TextColor3 = Styles.Accent
@@ -89,7 +109,7 @@ function Library:Init(Config)
     TabHolder.BorderSizePixel = 0
     TabHolder.ScrollBarThickness = 0
     TabHolder.Parent = Sidebar
-    local TabList = Instance.new("UIListLayout") TabList.Padding = UDim.new(0,8) TabList.HorizontalAlignment=Enum.HorizontalAlignment.Center TabList.Parent=TabHolder
+    local TabList = Instance.new("UIListLayout") TabList.Padding = UDim.new(0,5) TabList.HorizontalAlignment=Enum.HorizontalAlignment.Center TabList.Parent=TabHolder
 
     -- Page Container
     local PageHolder = Instance.new("Frame")
@@ -98,7 +118,7 @@ function Library:Init(Config)
     PageHolder.BackgroundTransparency = 1
     PageHolder.Parent = Main
 
-    -- DRAG SYSTEM (CORRIGIDO: Só arrasta pela Sidebar)
+    -- Drag System (Só Sidebar)
     local dragging, dragStart, startPos
     Sidebar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -113,25 +133,44 @@ function Library:Init(Config)
     end)
     UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
 
-    -- Toggle Key
     UserInputService.InputBegan:Connect(function(i,gp) if not gp and i.KeyCode==Enum.KeyCode.RightControl then Main.Visible = not Main.Visible end end)
 
     local Window = {}
     local FirstTab = true
 
-    function Window:Tab(name, icon)
+    function Window:Tab(name, iconId)
+        -- Botão
         local TabBtn = Instance.new("TextButton")
-        TabBtn.Size = UDim2.new(0.85, 0, 0, 42)
+        TabBtn.Size = UDim2.new(0.85, 0, 0, 45)
         TabBtn.BackgroundColor3 = Styles.Sidebar
         TabBtn.Text = ""
         TabBtn.AutoButtonColor = false
         TabBtn.Parent = TabHolder
         
-        local TCorner = Instance.new("UICorner") TCorner.CornerRadius = UDim.new(0,8) TCorner.Parent = TabBtn
+        local TCorner = Instance.new("UICorner") TCorner.CornerRadius = UDim.new(0, 8) TCorner.Parent = TabBtn
         
-        local TIco = Instance.new("ImageLabel") TIco.Size=UDim2.new(0,24,0,24) TIco.Position=UDim2.new(0,12,0.5,-12) TIco.BackgroundTransparency=1 TIco.Image=icon TIco.ImageColor3=Styles.TextDim TIco.Parent=TabBtn
-        local TTxt = Instance.new("TextLabel") TTxt.Text=name TTxt.Size=UDim2.new(1,-50,1,0) TTxt.Position=UDim2.new(0,50,0,0) TTxt.BackgroundTransparency=1 TTxt.TextXAlignment=Enum.TextXAlignment.Left TTxt.Font=Enum.Font.GothamBold TTxt.TextSize=14 TTxt.TextColor3=Styles.TextDim TTxt.Parent=TabBtn
+        -- Ícone
+        local Icon = Instance.new("ImageLabel")
+        Icon.Size = UDim2.new(0, 24, 0, 24)
+        Icon.Position = UDim2.new(0, 12, 0.5, -12)
+        Icon.BackgroundTransparency = 1
+        Icon.Image = iconId or ""
+        Icon.ImageColor3 = Styles.TextDim
+        Icon.Parent = TabBtn
 
+        -- Texto
+        local Title = Instance.new("TextLabel")
+        Title.Text = name
+        Title.Size = UDim2.new(1, -50, 1, 0)
+        Title.Position = UDim2.new(0, 50, 0, 0)
+        Title.BackgroundTransparency = 1
+        Title.TextXAlignment = Enum.TextXAlignment.Left
+        Title.Font = Enum.Font.GothamBold
+        Title.TextSize = 14
+        Title.TextColor3 = Styles.TextDim
+        Title.Parent = TabBtn
+
+        -- Página
         local Page = Instance.new("ScrollingFrame")
         Page.Size = UDim2.new(1,0,1,0)
         Page.BackgroundTransparency = 1
@@ -155,9 +194,9 @@ function Library:Init(Config)
             for _,v in pairs(PageHolder:GetChildren()) do v.Visible=false end
             
             Page.Visible = true
-            Library:Tween(TabBtn, {BackgroundColor3 = Color3.fromRGB(22, 22, 26)})
-            Library:Tween(TIco, {ImageColor3 = Styles.Accent})
-            Library:Tween(TTxt, {TextColor3 = Styles.Text})
+            Library:Tween(TabBtn, {BackgroundColor3 = Color3.fromRGB(25, 25, 30)})
+            Library:Tween(Icon, {ImageColor3 = Styles.Accent})
+            Library:Tween(Title, {TextColor3 = Styles.Text})
         end
 
         TabBtn.MouseButton1Click:Connect(Activate)
@@ -167,12 +206,12 @@ function Library:Init(Config)
 
         function Elements:Section(text)
             local S = Instance.new("TextLabel")
-            S.Text = text:upper()
+            S.Text = text
             S.Size = UDim2.new(1,0,0,30)
             S.BackgroundTransparency = 1
             S.TextColor3 = Styles.Accent
             S.Font = Enum.Font.GothamBlack
-            S.TextSize = 11
+            S.TextSize = 12
             S.TextXAlignment = Enum.TextXAlignment.Left
             S.Parent = Page
         end
@@ -280,7 +319,6 @@ function Library:Init(Config)
                 callback(res)
             end
 
-            -- SLIDER LOGIC FIXADA (Não interfere no drag da janela)
             BarBG.InputBegan:Connect(function(i)
                 if i.UserInputType == Enum.UserInputType.MouseButton1 then
                     local dragging = true
@@ -290,9 +328,31 @@ function Library:Init(Config)
                 end
             end)
             
-            -- Init
             local p = (def-min)/(max-min)
             Bar.Size = UDim2.new(p,0,1,0)
+        end
+
+        function Elements:Button(text, callback)
+            local Button = Instance.new("TextButton")
+            Button.Size = UDim2.new(1, 0, 0, 40)
+            Button.BackgroundColor3 = Styles.Section
+            Button.Text = text
+            Button.TextColor3 = Styles.Text
+            Button.Font = Enum.Font.GothamBold
+            Button.TextSize = 13
+            Button.AutoButtonColor = false
+            Button.Parent = Page
+            Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 6)
+            local Stroke = Instance.new("UIStroke") Stroke.Color = Styles.Outline Stroke.Parent = Button
+
+            Button.MouseEnter:Connect(function() Library:Tween(Stroke, {Color = Styles.Accent}) end)
+            Button.MouseLeave:Connect(function() Library:Tween(Stroke, {Color = Styles.Outline}) end)
+            Button.MouseButton1Click:Connect(function()
+                Library:Tween(Button, {BackgroundColor3 = Styles.Accent}, 0.1)
+                wait(0.1)
+                Library:Tween(Button, {BackgroundColor3 = Styles.Section}, 0.2)
+                callback()
+            end)
         end
 
         return Elements
