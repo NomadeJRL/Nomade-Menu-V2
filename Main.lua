@@ -1,15 +1,14 @@
 --[[
-    NOMADE V3 - MAIN
-    Profissionalizado: Sistema de Conexões + Bypass
+    NOMADE V4 - MAIN LOGIC
+    Usage: loadstring(game:HttpGet("..."))()
 ]]
 
--- Link da Library (SUBSTITUA PELO SEU RAW LINK)
+-- !!! SUBSTITUA PELO SEU LINK DA LIBRARY LIMPO !!!
 local LibLink = "https://raw.githubusercontent.com/NomadeJRL/Nomade-Menu-V2/main/Library.lua"
 local Library = loadstring(game:HttpGet(LibLink))()
 
-local Window = Library:Init({Title = "NOMADE REMASTER"})
+local Window = Library:Window({Title = "NOMADE V4 | REDUX"})
 
--- Serviços
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -17,23 +16,21 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
--- Tabela para guardar conexões (Isso arruma o bug de não desligar)
-local Toggles = {}
-
 -- == TABS ==
-local Combat = Window:Tab("Combat", "⚔️")
-local Visuals = Window:Tab("Visuals", "👁️")
-local Movement = Window:Tab("Movement", "🏃")
-local World = Window:Tab("World", "🌍")
+local Combat = Window:Tab("Combat")
+local Visuals = Window:Tab("Visuals")
+local Movement = Window:Tab("Movement")
+local World = Window:Tab("World")
 
 -- ================= COMBAT =================
-Combat:Section("Aimbot")
+Combat:Section("Legit & Rage")
 
-Combat:Toggle("Aimbot (Camera)", function(state)
-    if state then
-        Toggles.Aim = RunService.RenderStepped:Connect(function()
+Combat:Toggle("Aimbot (Auto Lock)", false, function(state)
+    getgenv().Aimbot = state
+    RunService.RenderStepped:Connect(function()
+        if getgenv().Aimbot then
             local closest = nil
-            local dist = 150 -- FOV
+            local dist = 150
             for _, v in pairs(Players:GetPlayers()) do
                 if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("Head") then
                     local pos, vis = Camera:WorldToViewportPoint(v.Character.Head.Position)
@@ -46,150 +43,112 @@ Combat:Toggle("Aimbot (Camera)", function(state)
             if closest then 
                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position) 
             end
-        end)
-    else
-        if Toggles.Aim then Toggles.Aim:Disconnect() end
-    end
+        end
+    end)
 end)
 
-Combat:Section("Exploits")
-Combat:Toggle("TriggerBot", function(state)
-    if state then
-        Toggles.Trig = RunService.RenderStepped:Connect(function()
-            if Mouse.Target and Mouse.Target.Parent:FindFirstChild("Humanoid") then
-                mouse1click()
+Combat:Toggle("Hitbox Expander", false, function(state)
+    getgenv().Hitbox = state
+    while getgenv().Hitbox do
+        task.wait(1)
+        for _, v in pairs(Players:GetPlayers()) do
+            if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+                v.Character.HumanoidRootPart.Size = Vector3.new(15,15,15)
+                v.Character.HumanoidRootPart.Transparency = 0.7
+                v.Character.HumanoidRootPart.CanCollide = false
+                v.Character.HumanoidRootPart.Color = Color3.fromRGB(255,0,0)
             end
-        end)
-    else
-        if Toggles.Trig then Toggles.Trig:Disconnect() end
+        end
     end
 end)
 
 -- ================= VISUALS =================
-Visuals:Section("ESP System")
+Visuals:Section("ESP")
 
-Visuals:Toggle("ESP Box", function(state)
-    if state then
-        Toggles.ESP = RunService.RenderStepped:Connect(function()
-            for _, p in pairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then
-                    if not p.Character:FindFirstChild("NomadeESP") then
+Visuals:Toggle("ESP Box", false, function(state)
+    getgenv().ESP = state
+    if not state then
+        for _, v in pairs(workspace:GetDescendants()) do if v.Name == "NomadeESP" then v:Destroy() end end
+    else
+        task.spawn(function()
+            while getgenv().ESP do
+                for _, v in pairs(Players:GetPlayers()) do
+                    if v ~= LocalPlayer and v.Character and not v.Character:FindFirstChild("NomadeESP") then
                         local h = Instance.new("Highlight")
                         h.Name = "NomadeESP"
                         h.FillTransparency = 1
-                        h.OutlineColor = Color3.fromRGB(255, 40, 40)
-                        h.Parent = p.Character
+                        h.OutlineColor = Color3.fromRGB(255, 50, 50)
+                        h.Parent = v.Character
                     end
                 end
+                task.wait(1)
             end
         end)
-    else
-        if Toggles.ESP then Toggles.ESP:Disconnect() end
-        for _, v in pairs(workspace:GetDescendants()) do 
-            if v.Name == "NomadeESP" then v:Destroy() end 
-        end
     end
 end)
 
-Visuals:Toggle("Chams (Fill)", function(state)
-    if state then
-        Toggles.Chams = RunService.RenderStepped:Connect(function()
-            for _, p in pairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then
-                    local h = p.Character:FindFirstChild("NomadeESP")
-                    if h then h.FillTransparency = 0.5 h.FillColor = Color3.fromRGB(255, 0, 0) end
-                end
-            end
-        end)
-    else
-        if Toggles.Chams then Toggles.Chams:Disconnect() end
-        -- Limpa visual ao desligar
-        for _, v in pairs(workspace:GetDescendants()) do 
-            if v.Name == "NomadeESP" then v.FillTransparency = 1 end 
-        end
-    end
-end)
-
-Visuals:Section("Environment")
-Visuals:Toggle("Fullbright", function(state)
+Visuals:Toggle("Fullbright", false, function(state)
     if state then
         game.Lighting.Brightness = 2
         game.Lighting.ClockTime = 14
         game.Lighting.GlobalShadows = false
+        game.Lighting.FogEnd = 100000
     else
-        game.Lighting.Brightness = 1
         game.Lighting.GlobalShadows = true
     end
 end)
 
 -- ================= MOVEMENT =================
-Movement:Section("Speed & Fly")
+Movement:Section("Speed")
 
-local SpeedVal = 16
-Movement:Slider("WalkSpeed Amount", 16, 200, 16, function(v) SpeedVal = v end)
-
-Movement:Toggle("Enable Speed", function(state)
-    if state then
-        Toggles.Speed = RunService.RenderStepped:Connect(function()
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                LocalPlayer.Character.Humanoid.WalkSpeed = SpeedVal
+Movement:Toggle("Speed Boost (CFrame)", false, function(state)
+    getgenv().Speed = state
+    RunService.RenderStepped:Connect(function()
+        if getgenv().Speed and LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+            local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hum and root and hum.MoveDirection.Magnitude > 0 then
+                root.CFrame = root.CFrame + (hum.MoveDirection * 0.5) -- Velocidade fixa
             end
-        end)
-    else
-        if Toggles.Speed then Toggles.Speed:Disconnect() end
-        if LocalPlayer.Character then LocalPlayer.Character.Humanoid.WalkSpeed = 16 end
-    end
+        end
+    end)
 end)
 
-Movement:Toggle("Infinite Jump", function(state)
-    if state then
-        Toggles.InfJump = UserInputService.JumpRequest:Connect(function()
+Movement:Toggle("Infinite Jump", false, function(state)
+    getgenv().InfJump = state
+    UserInputService.JumpRequest:Connect(function()
+        if getgenv().InfJump and LocalPlayer.Character then
             LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
-        end)
-    else
-        if Toggles.InfJump then Toggles.InfJump:Disconnect() end
-    end
+        end
+    end)
 end)
 
-Movement:Button("Fly (Press F)", function()
-    local flying = false
-    local bv = nil
-    local con
-    con = Mouse.KeyDown:Connect(function(k)
-        if k == "f" then
-            flying = not flying
-            if flying then
-                bv = Instance.new("BodyVelocity")
-                bv.Velocity = Vector3.new(0,0,0)
-                bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                bv.Parent = LocalPlayer.Character.HumanoidRootPart
-                while flying and LocalPlayer.Character do
-                    RunService.RenderStepped:Wait()
-                    local cam = workspace.CurrentCamera.CFrame
-                    local v = Vector3.new()
-                    if UserInputService:IsKeyDown(Enum.KeyCode.W) then v=v+cam.LookVector end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.S) then v=v-cam.LookVector end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.D) then v=v+cam.RightVector end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.A) then v=v-cam.RightVector end
-                    bv.Velocity = v * 80
-                end
-            else
-                if bv then bv:Destroy() end
+Movement:Toggle("Noclip", false, function(state)
+    getgenv().Noclip = state
+    RunService.Stepped:Connect(function()
+        if getgenv().Noclip and LocalPlayer.Character then
+            for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+                if v:IsA("BasePart") then v.CanCollide = false end
             end
         end
     end)
 end)
 
 -- ================= WORLD =================
-World:Section("Modifications")
+World:Section("Env")
 
-World:Toggle("Low Gravity", function(state)
+World:Toggle("Low Gravity", false, function(state)
     workspace.Gravity = state and 50 or 196.2
 end)
 
-World:Button("Server Hop", function()
-    -- Função simples de aviso
-    Library:Tween(game.CoreGui.NomadeV3Remaster.MainFrame, {BackgroundColor3 = Color3.fromRGB(50,20,20)})
-    wait(0.2)
-    Library:Tween(game.CoreGui.NomadeV3Remaster.MainFrame, {BackgroundColor3 = Color3.fromRGB(15,15,20)})
+World:Button("Click TP (Ctrl+Click)", function()
+    Mouse.Button1Down:Connect(function()
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) and LocalPlayer.Character then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(Mouse.Hit.p + Vector3.new(0,3,0))
+        end
+    end)
+end)
+
+World:Button("Destroy Menu", function()
+    game.CoreGui.NomadeV4:Destroy()
 end)
