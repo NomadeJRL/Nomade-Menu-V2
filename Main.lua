@@ -1,13 +1,28 @@
 --[[
     HYDRA NETWORK - MAIN LOGIC
-    Features: 35+ (Combat, Visuals, Movement, World, Player)
+    Versão com Anti-Cache
 ]]
 
--- !!! COLOQUE SEU LINK RAW DA LIBRARY AQUI !!!
-local LibLink = "https://raw.githubusercontent.com/NomadeJRL/Nomade-Menu-V2/main/Library.lua"
+-- Link da Library com sistema anti-cache (adiciona números aleatórios no final)
+local LibLink = "https://raw.githubusercontent.com/NomadeJRL/Nomade-Menu-V2/main/Library.lua?v="..tostring(math.random(1, 100000))
+
+-- Carrega a Library
 local Library = loadstring(game:HttpGet(LibLink))()
 
+-- Verificação de Segurança (Para não dar erro se falhar)
+if not Library or not Library.Window then
+    game.StarterGui:SetCore("SendNotification", {
+        Title = "Erro Crítico";
+        Text = "A Library não carregou! Verifique o GitHub.";
+        Duration = 5;
+    })
+    return -- Para o script
+end
+
+-- Cria a Janela
 local Window = Library:Window({Title = "HYDRA"})
+
+-- ... O RESTO DO SCRIPT CONTINUA IGUAL ABAIXO ...
 
 -- Serviços
 local Players = game:GetService("Players")
