@@ -9,13 +9,14 @@
     - NOVO: Teleportes (Click TP, Safe Spot).
     - NOVO: Gravity Slider e Time Speed.
     - NOVO: Aba TROLL (Fling, Spam, Invisible).
+    - UPDATE: Seletor de Player na Aba Troll (Sarrada, Spectate, Fling Target).
     - OTIMIZAÇÃO: Physics Suspension agora é mais estável.
     
     FEATURES:
     - Combate: Legit, Silent, Rage, Wallbang.
     - Visuais: Chams, ESP, X-Ray.
     - Global: Fly V3, NoClip, Suspension V2, God Mode, Teleport.
-    - Troll: Fling Rotation, Chat Spam, Ghost Mode.
+    - Troll: Fling Rotation, Chat Spam, Ghost Mode, Player Target System.
     - Misc: Speed, Jump, UI Scale.
 ]]
 
@@ -46,6 +47,7 @@ local FlyVelocity = nil
 local FlyGyro = nil
 local SuspVelocity = nil 
 local FlingBAV = nil -- Troll Fling
+local TargetPlayerInstance = nil -- Troll Target
 
 --// CONFIGURAÇÃO
 local Config = {
@@ -104,7 +106,11 @@ local Config = {
         SitLoop = false,
         Freeze = false,
         SpamMessage = "NOMADE MENU ON TOP",
-        FlingPower = 10000
+        FlingPower = 10000,
+        TargetName = "",       -- NOVO
+        Sarrada = false,       -- NOVO
+        Spectate = false,      -- NOVO
+        FlingTarget = false    -- NOVO
     },
     Misc = {
         WalkSpeed = 16,
@@ -446,6 +452,35 @@ function UI:CreateWindow(Name)
             table.insert(ThemeObjects.Accents, Label)
         end
 
+        function Components:Button(text, callback)
+            local BtnFrame = Instance.new("Frame")
+            BtnFrame.Size = UDim2.new(1, -10, 0, 35)
+            BtnFrame.BackgroundColor3 = CurrentTheme.Element
+            BtnFrame.Parent = Page
+            table.insert(ThemeObjects.Elements, BtnFrame)
+            
+            local BtnCorner = Instance.new("UICorner")
+            BtnCorner.CornerRadius = UDim.new(0, 6)
+            BtnCorner.Parent = BtnFrame
+            
+            local TextBtn = Instance.new("TextButton")
+            TextBtn.Text = text
+            TextBtn.Font = Enum.Font.GothamBold
+            TextBtn.TextSize = 14
+            TextBtn.TextColor3 = CurrentTheme.Text
+            TextBtn.Size = UDim2.new(1, 0, 1, 0)
+            TextBtn.BackgroundTransparency = 1
+            TextBtn.Parent = BtnFrame
+            table.insert(ThemeObjects.Texts, TextBtn)
+            
+            TextBtn.MouseButton1Click:Connect(function()
+                UI:Tween(BtnFrame, {BackgroundColor3 = CurrentTheme.Accent}, 0.1)
+                task.wait(0.1)
+                UI:Tween(BtnFrame, {BackgroundColor3 = CurrentTheme.Element}, 0.2)
+                if callback then callback() end
+            end)
+        end
+
         function Components:Toggle(text, configTable, configKey, callback, risky)
             local ToggleFrame = Instance.new("Frame")
             ToggleFrame.Size = UDim2.new(1, -10, 0, 45)
@@ -683,7 +718,7 @@ function UI:CreateWindow(Name)
         end
         
         -- Campo de Texto (Textbox) para o Troll
-        function Components:TextBox(text, configTable, configKey)
+        function Components:TextBox(text, configTable, configKey, callback)
             local BoxFrame = Instance.new("Frame")
             BoxFrame.Size = UDim2.new(1, -10, 0, 45)
             BoxFrame.BackgroundColor3 = CurrentTheme.Element
@@ -723,6 +758,7 @@ function UI:CreateWindow(Name)
 
             Input.FocusLost:Connect(function()
                 configTable[configKey] = Input.Text
+                if callback then callback(Input.Text) end
             end)
         end
 
@@ -844,6 +880,19 @@ local function ToggleSuspension(state)
 end
 
 --// TROLL FUNCTIONS
+local function UpdateTarget(name)
+    if name == "" then TargetPlayerInstance = nil return "Nenhum" end
+    for _, v in pairs(Players:GetPlayers()) do
+        if string.sub(string.lower(v.Name), 1, #name) == string.lower(name) or 
+           string.sub(string.lower(v.DisplayName), 1, #name) == string.lower(name) then
+            TargetPlayerInstance = v
+            return v.Name
+        end
+    end
+    TargetPlayerInstance = nil
+    return "Não Encontrado"
+end
+
 local function ToggleFling(state)
     local char = LocalPlayer.Character
     if not char then return end
@@ -979,6 +1028,28 @@ local function UpdateGlobalPhysics()
                -- Only unanchor if not needed elsewhere, but safe to default false here for character control
                hrp.Anchored = false 
             end
+        end
+        
+        -- SARRADA (BANG) LOOP
+        if Config.Troll.Sarrada and TargetPlayerInstance and TargetPlayerInstance.Character and TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart") then
+            local targetHR = TargetPlayerInstance.Character.HumanoidRootPart
+            local offset = targetHR.CFrame * CFrame.new(0, 0, 1.1) -- Atrás do player
+            
+            -- Movimento de oscilação no eixo Z (Sarrada)
+            local thrust = math.sin(tick() * 18) * 0.5
+            
+            hrp.CFrame = offset * CFrame.new(0, 0, thrust)
+            hrp.Velocity = Vector3.new(0,0,0)
+            hrp.RotVelocity = Vector3.new(0,0,0)
+            Config.Global.NoClip = true -- Forçar noclip para não bugar
+        end
+        
+        -- FLING TARGET LOOP
+        if Config.Troll.FlingTarget and TargetPlayerInstance and TargetPlayerInstance.Character and TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart") then
+            local targetHR = TargetPlayerInstance.Character.HumanoidRootPart
+            hrp.CFrame = CFrame.new(targetHR.Position) * CFrame.new(0, 0, 0)
+            hrp.RotVelocity = Vector3.new(9000, 9000, 9000)
+            Config.Global.NoClip = true
         end
     end
 end
@@ -1267,6 +1338,15 @@ RunService:BindToRenderStep("Nomade_Core_Loop_V26", Enum.RenderPriority.Camera.V
             task.wait(0.2) -- Debounce
         end
     end
+    
+    -- View Target (Spectate)
+    if Config.Troll.Spectate and TargetPlayerInstance and TargetPlayerInstance.Character then
+        Camera.CameraSubject = TargetPlayerInstance.Character:FindFirstChild("Humanoid")
+    else
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            Camera.CameraSubject = LocalPlayer.Character.Humanoid
+        end
+    end
 end)
 
 Players.PlayerRemoving:Connect(RemoveESP)
@@ -1334,7 +1414,21 @@ GlobalTab:Toggle("Super Pulo", Config.Global, "HighJump")
 GlobalTab:Slider("Altura Pulo", 50, 500, Config.Global, "HighJumpPower")
 
 local TrollTab = Menu:Tab("TROLL")
-TrollTab:Section("ANNOY PLAYERS")
+TrollTab:Section("ALVO (PLAYER)")
+TrollTab:TextBox("Nome do Jogador", Config.Troll, "TargetName", function(val)
+    local realName = UpdateTarget(val)
+    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Alvo Definido", Text = realName, Duration = 3})
+end)
+TrollTab:Section("AÇÕES DE ALVO")
+TrollTab:Toggle("Sarrada (Loop)", Config.Troll, "Sarrada", nil, true)
+TrollTab:Toggle("Spectate (Ver Câmera)", Config.Troll, "Spectate")
+TrollTab:Toggle("Fling Alvo (Girar Nele)", Config.Troll, "FlingTarget", nil, true)
+TrollTab:Button("Teleportar Atrás (Back)", function()
+    if TargetPlayerInstance and TargetPlayerInstance.Character and TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character then
+        LocalPlayer.Character:SetPrimaryPartCFrame(TargetPlayerInstance.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
+    end
+end)
+TrollTab:Section("ANNOY PLAYERS (GLOBAL)")
 TrollTab:Toggle("Fling All (Girar/Tocar)", Config.Troll, "Fling", ToggleFling, true)
 TrollTab:Slider("Força Fling", 1000, 50000, Config.Troll, "FlingPower")
 TrollTab:Section("CHAT")
@@ -1363,6 +1457,6 @@ end)
 
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "Nomade V26",
-    Text = "Troll Tab Added. [INSERT]",
+    Text = "Target System Added. [INSERT]",
     Duration = 5
 })
