@@ -1,19 +1,35 @@
 --[[
-    NOMADE MENU - V30 ULTIMATE EDITION (ROBLOX LUAU)
+    NOMADE MENU - V31 ULTIMATE EDITION (ROBLOX LUAU)
     TARGET: FPS GAMES (Universal)
     STYLE: Modern / Material Design / Animated / Themed
     AUTHOR: System Architect
     
-    UPDATE LOG V30:
+    UPDATE LOG V31 (USER REQUEST):
+    - UI UPDATE: Ícones das abas laterais alterados para Símbolos de Texto (Unicode/Emoji) conforme solicitado.
+      - Removido ImageLabel (PNG).
+      - Adicionado TextLabel com símbolos (⚔, ⚡, 👁, 🌐, etc).
+    
+    UPDATE LOG V31 (PREVIOUS):
+    - CORREÇÃO CRÍTICA: Foto de Perfil (Profile Picture) agora carrega corretamente com Retry System.
+    - UI UPDATE: Botões Laterais (Sidebar) redesenhados.
+      - Textos centralizados com ajuste visual.
+      - Sistema inteligente de Ícones.
+    
+    UPDATE LOG V30 (REVISED IV):
+    - REDESIGN UI: Botões Laterais (Melhoria visual, novos ícones, ajustes de proporção).
+    - UPDATE LOG V30 (REVISED III):
+    - CORREÇÃO DE BUGS: Drag System (Menu sumindo ao clicar rápido) corrigido com Debounce.
+    - REDESIGN UI: Botões Laterais (Novo estilo "Card", Bordas visíveis, Melhor espaçamento).
+    - UPDATE LOG V30 (REVISED II):
+    - REDESIGN UI: Botões Laterais (Proporção, Espaçamento, Design Profissional).
+    - UPDATE LOG V30 (REVISED):
+    - CORREÇÃO CRÍTICA UI: Perfil do Usuário (Z-Index fix, Layout fix).
+    - REDESIGN UI: Abas Laterais (Ícones, Novo Layout, Efeitos de Hover/Active).
+    - UPDATE LOG V30 (Original):
     - REFORMULAÇÃO UI: Player Dropdown (Lista de Jogadores).
       - Agora possui tamanho fixo pequeno (Max 200px) com ScrollingFrame.
       - Atualização automática em tempo real (Sem botão).
       - Event-based listener (PlayerAdded/Removing).
-    - UPDATE LOG V29/V28:
-    - TriggerBot 100% Funcional.
-    - Troll "Mamadinha".
-    - Kill Menu System.
-    - Correções Visuais (ESP/Rendering).
 
     FEATURES:
     - Combate: Legit, Silent, Rage, Wallbang, TriggerBot.
@@ -250,6 +266,10 @@ function UI:ApplyTheme(ThemeName)
             UI:Tween(v, {TextColor3 = newTheme.Accent})
         elseif v:IsA("ScrollingFrame") then
             UI:Tween(v, {ScrollBarImageColor3 = newTheme.Accent})
+        elseif v:IsA("UIStroke") then
+            UI:Tween(v, {Color = newTheme.Accent})
+        elseif v:IsA("ImageLabel") then
+            UI:Tween(v, {ImageColor3 = newTheme.Accent})
         else
             UI:Tween(v, {BackgroundColor3 = newTheme.Accent})
         end
@@ -351,22 +371,44 @@ function UI:CreateWindow(Name)
     MainUIScale.Scale = Config.Misc.MenuScale
     MainUIScale.Parent = MainFrame
 
-    -- Drag Logic
+    -- Drag Logic (Fixed Disappearing Bug with Debounce)
     local dragging, dragInput, dragStart, startPos
+    local dragDebounce = false -- Anti-spam fix
+    
     local function update(input)
         local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        -- Usando Tween para suavizar e evitar falhas de calculo instantâneo
+        TweenService:Create(MainFrame, TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Position = newPos}):Play()
     end
+    
     MainFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true; dragStart = input.Position; startPos = MainFrame.Position
-            input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not dragDebounce then
+            dragDebounce = true -- Impede múltiplos triggers de start
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    dragDebounce = false -- Libera o drag
+                end
+            end)
         end
     end)
+    
     MainFrame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then 
+            dragInput = input 
+        end
     end)
-    UserInputService.InputChanged:Connect(function(input) if input == dragInput and dragging then update(input) end end)
+    
+    UserInputService.InputChanged:Connect(function(input) 
+        if input == dragInput and dragging then 
+            update(input) 
+        end 
+    end)
 
     local UICorner = Instance.new("UICorner")
     UICorner.CornerRadius = UDim.new(0, 8)
@@ -414,7 +456,7 @@ function UI:CreateWindow(Name)
     table.insert(ThemeObjects.Accents, Title)
 
     local Version = Instance.new("TextLabel")
-    Version.Text = "Ultimate V30"
+    Version.Text = "Ultimate V31"
     Version.Font = Enum.Font.Gotham
     Version.TextSize = 12
     Version.TextColor3 = Color3.fromRGB(150,150,150)
@@ -424,18 +466,97 @@ function UI:CreateWindow(Name)
     Version.ZIndex = 3
     Version.Parent = Sidebar
 
-    -- Tabs
+    -- Tabs Container (Revised size to fit better and be higher)
     local TabContainer = Instance.new("Frame")
-    TabContainer.Position = UDim2.new(0, 10, 0, 100)
-    TabContainer.Size = UDim2.new(1, -20, 1, -110)
+    TabContainer.Position = UDim2.new(0, 10, 0, 85)
+    TabContainer.Size = UDim2.new(1, -20, 1, -180) -- Increased padding from bottom to avoid profile
     TabContainer.BackgroundTransparency = 1
-    TabContainer.ZIndex = 3
+    TabContainer.ZIndex = 5
     TabContainer.Parent = Sidebar
 
     local TabListLayout = Instance.new("UIListLayout")
-    TabListLayout.Padding = UDim.new(0, 8)
+    TabListLayout.Padding = UDim.new(0, 8) -- Adjusted padding
     TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     TabListLayout.Parent = TabContainer
+
+    -- User Profile Area (REVISED V31 - FIXED PROFILE PICTURE WITH RETRY)
+    local ProfileFrame = Instance.new("Frame")
+    ProfileFrame.Name = "UserProfile"
+    ProfileFrame.Size = UDim2.new(1, -20, 0, 55)
+    ProfileFrame.Position = UDim2.new(0, 10, 1, -65) -- Anchored bottom
+    ProfileFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    ProfileFrame.BorderSizePixel = 0
+    ProfileFrame.ZIndex = 15 -- Max ZIndex to ensure visibility
+    ProfileFrame.Parent = Sidebar
+    table.insert(ThemeObjects.Elements, ProfileFrame)
+
+    local ProfileCorner = Instance.new("UICorner")
+    ProfileCorner.CornerRadius = UDim.new(0, 8)
+    ProfileCorner.Parent = ProfileFrame
+
+    local ProfileStroke = Instance.new("UIStroke")
+    ProfileStroke.Color = CurrentTheme.Accent
+    ProfileStroke.Thickness = 1.5
+    ProfileStroke.Transparency = 0.5
+    ProfileStroke.Parent = ProfileFrame
+    table.insert(ThemeObjects.Accents, ProfileStroke)
+
+    local Avatar = Instance.new("ImageLabel")
+    Avatar.Size = UDim2.new(0, 40, 0, 40)
+    Avatar.Position = UDim2.new(0, 8, 0.5, -20)
+    Avatar.BackgroundTransparency = 1
+    Avatar.ZIndex = 16
+    Avatar.Image = "rbxassetid://4034483344" -- Fallback default
+    Avatar.Parent = ProfileFrame
+
+    -- FIX V31: Robust profile picture loader with retries and high resolution
+    task.spawn(function()
+        local content = "rbxassetid://4034483344"
+        local success, res = pcall(function()
+            return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+        end)
+        
+        if success and res then 
+            content = res 
+        else
+            -- Retry once if failed (common Roblox issue)
+            task.wait(1.5)
+            pcall(function()
+                content = Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+            end)
+        end
+        Avatar.Image = content
+    end)
+
+    local AvatarCorner = Instance.new("UICorner")
+    AvatarCorner.CornerRadius = UDim.new(1, 0) -- Circle
+    AvatarCorner.Parent = Avatar
+
+    local UserName = Instance.new("TextLabel")
+    UserName.Text = LocalPlayer.DisplayName
+    UserName.Font = Enum.Font.GothamBold
+    UserName.TextSize = 13
+    UserName.TextColor3 = CurrentTheme.Text
+    UserName.BackgroundTransparency = 1
+    UserName.Position = UDim2.new(0, 58, 0, 10)
+    UserName.Size = UDim2.new(1, -60, 0, 15)
+    UserName.TextXAlignment = Enum.TextXAlignment.Left
+    UserName.TextTruncate = Enum.TextTruncate.AtEnd
+    UserName.ZIndex = 16
+    UserName.Parent = ProfileFrame
+    table.insert(ThemeObjects.Texts, UserName)
+
+    local UserRank = Instance.new("TextLabel")
+    UserRank.Text = "@" .. LocalPlayer.Name
+    UserRank.Font = Enum.Font.Gotham
+    UserRank.TextSize = 11
+    UserRank.TextColor3 = Color3.fromRGB(180, 180, 180)
+    UserRank.BackgroundTransparency = 1
+    UserRank.Position = UDim2.new(0, 58, 0, 28)
+    UserRank.Size = UDim2.new(1, -60, 0, 15)
+    UserRank.TextXAlignment = Enum.TextXAlignment.Left
+    UserRank.ZIndex = 16
+    UserRank.Parent = ProfileFrame
 
     -- Pages
     local PageContainer = Instance.new("Frame")
@@ -446,25 +567,92 @@ function UI:CreateWindow(Name)
     PageContainer.ClipsDescendants = true
     PageContainer.Parent = MainFrame
 
+    -- Icon Map for Sidebar (Unicode Symbols per User Request)
+    local TabIcons = {
+        ["COMBATE"] = "⚔",
+        ["RAGE"] = "⚡", 
+        ["VISUAIS"] = "👁",
+        ["GLOBAL"] = "🌐",
+        ["TROLL"] = "👻", 
+        ["OUTROS"] = "📂", 
+        ["CONFIGURAÇÃO"] = "⚙" 
+    }
+
     local Window = {Tabs = {}}
 
     function Window:Tab(name)
+        -- Button Container
         local TabBtn = Instance.new("TextButton")
-        TabBtn.Text = name
-        TabBtn.Font = Enum.Font.GothamMedium
-        TabBtn.TextSize = 14
-        TabBtn.TextColor3 = Color3.fromRGB(150,150,150)
-        TabBtn.BackgroundColor3 = CurrentTheme.Background
-        TabBtn.Size = UDim2.new(1, 0, 0, 35)
+        TabBtn.Name = name .. "_Tab"
+        TabBtn.Text = "" 
+        TabBtn.BackgroundColor3 = CurrentTheme.Element
+        TabBtn.BackgroundTransparency = 0 -- Fundo visível (estilo botão)
+        TabBtn.Size = UDim2.new(1, 0, 0, 42) -- Adjusted height
         TabBtn.AutoButtonColor = false
-        TabBtn.ZIndex = 3
+        TabBtn.ZIndex = 5
         TabBtn.Parent = TabContainer
-        table.insert(ThemeObjects.Backgrounds, TabBtn) 
-
+        
         local BtnCorner = Instance.new("UICorner")
-        BtnCorner.CornerRadius = UDim.new(0, 6)
+        BtnCorner.CornerRadius = UDim.new(0, 8)
         BtnCorner.Parent = TabBtn
 
+        -- Border/Stroke Accent (Roxo em volta) - Now visible on inactive as faint border
+        local TabStroke = Instance.new("UIStroke")
+        TabStroke.Color = Color3.fromRGB(60,60,65) -- Default inactive border
+        TabStroke.Thickness = 1.2
+        TabStroke.Transparency = 0.6 
+        TabStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        TabStroke.Parent = TabBtn
+        
+        -- Smart Icon Matching (Fuzzy Match / Detecção Inteligente de Simbolos)
+        local iconId = TabIcons[name] -- Tenta match exato primeiro
+        local nLower = name:lower()
+        
+        if not iconId then
+            if nLower:find("config") or nLower:find("ajustes") or nLower:find("settings") or nLower:find("opções") then 
+                iconId = TabIcons["CONFIGURAÇÃO"] 
+            elseif nLower:find("combat") or nLower:find("espada") or nLower:find("pvp") then 
+                iconId = TabIcons["COMBATE"] 
+            elseif nLower:find("rage") or nLower:find("fúria") then 
+                iconId = TabIcons["RAGE"]
+            elseif nLower:find("visua") or nLower:find("esp") or nLower:find("render") then 
+                iconId = TabIcons["VISUAIS"]
+            elseif nLower:find("glob") or nLower:find("moviment") or nLower:find("mundo") then 
+                iconId = TabIcons["GLOBAL"]
+            elseif nLower:find("troll") or nLower:find("zoeira") or nLower:find("fun") then 
+                iconId = TabIcons["TROLL"]
+            elseif nLower:find("outr") or nLower:find("misc") or nLower:find("extra") then 
+                iconId = TabIcons["OUTROS"]
+            end
+        end
+
+        -- Icon (Agora é TextLabel com símbolo Unicode)
+        local Icon = Instance.new("TextLabel")
+        Icon.Size = UDim2.new(0, 30, 1, 0)
+        Icon.Position = UDim2.new(0, 10, 0, 0) 
+        Icon.BackgroundTransparency = 1
+        Icon.Text = iconId or "⚙" -- Default Gear if failed
+        Icon.Font = Enum.Font.Gotham
+        Icon.TextSize = 20
+        Icon.TextColor3 = Color3.fromRGB(150,150,150)
+        Icon.ZIndex = 6
+        Icon.Parent = TabBtn
+
+        -- Label do Texto (Mais centralizado e alinhado com o símbolo)
+        local TabLabel = Instance.new("TextLabel")
+        TabLabel.Text = name
+        TabLabel.Font = Enum.Font.GothamBold
+        TabLabel.TextSize = 13 
+        TabLabel.TextColor3 = Color3.fromRGB(150,150,150)
+        TabLabel.BackgroundTransparency = 1
+        -- Ajuste para centralização: Ocupa o espaço restante e centraliza o texto relativo ao espaço disponível
+        TabLabel.Size = UDim2.new(1, -45, 1, 0)
+        TabLabel.Position = UDim2.new(0, 45, 0, 0) 
+        TabLabel.TextXAlignment = Enum.TextXAlignment.Left -- Mantém Left para leitura fluida
+        TabLabel.ZIndex = 6
+        TabLabel.Parent = TabBtn
+
+        -- Page Setup (Mantém igual)
         local Page = Instance.new("ScrollingFrame")
         Page.Size = UDim2.new(1, 0, 1, 0)
         Page.BackgroundTransparency = 1
@@ -487,27 +675,58 @@ function UI:CreateWindow(Name)
         PagePadding.PaddingLeft = UDim.new(0, 5)
         PagePadding.Parent = Page
 
+        -- Logica de Animação
+        local function UpdateState(active)
+            if active then
+                Page.Visible = true
+                Page.Position = UDim2.new(0, 20, 0, 0)
+                UI:Tween(Page, {Position = UDim2.new(0, 0, 0, 0)}, 0.3)
+                
+                -- Animação Tab Ativa (Com Stroke Roxo)
+                UI:Tween(TabBtn, {BackgroundColor3 = Color3.fromRGB(40,40,45)}) -- Fundo mais claro
+                UI:Tween(TabStroke, {Color = CurrentTheme.Accent, Transparency = 0}) -- Borda Roxa Solida
+                UI:Tween(TabLabel, {TextColor3 = CurrentTheme.Text}) 
+                UI:Tween(Icon, {TextColor3 = CurrentTheme.Accent})
+            else
+                Page.Visible = false
+                -- Animação Tab Inativa
+                UI:Tween(TabBtn, {BackgroundColor3 = CurrentTheme.Sidebar}) -- Fundo igual sidebar (ou mais escuro)
+                UI:Tween(TabStroke, {Color = Color3.fromRGB(60,60,65), Transparency = 0.6}) -- Borda Cinza fraca
+                UI:Tween(TabLabel, {TextColor3 = Color3.fromRGB(150,150,150)})
+                UI:Tween(Icon, {TextColor3 = Color3.fromRGB(150,150,150)})
+            end
+        end
+
         TabBtn.MouseButton1Click:Connect(function()
             for _, t in pairs(Window.Tabs) do
-                if t.Page.Visible then
-                    t.Page.Visible = false
-                end
-                UI:Tween(t.Btn, {BackgroundColor3 = CurrentTheme.Background, TextColor3 = Color3.fromRGB(150,150,150)})
+                t.UpdateState(false)
             end
-            
-            Page.Visible = true
-            Page.Position = UDim2.new(0, 30, 0, 0)
-            UI:Tween(Page, {Position = UDim2.new(0, 0, 0, 0)}, 0.3)
-            UI:Tween(TabBtn, {BackgroundColor3 = CurrentTheme.Element, TextColor3 = CurrentTheme.Text})
+            UpdateState(true)
+        end)
+
+        -- Hover Animation
+        TabBtn.MouseEnter:Connect(function()
+            if not Page.Visible then
+                UI:Tween(TabLabel, {TextColor3 = CurrentTheme.Text})
+                UI:Tween(Icon, {TextColor3 = CurrentTheme.Text})
+                UI:Tween(TabBtn, {BackgroundColor3 = CurrentTheme.Element})
+                UI:Tween(TabStroke, {Transparency = 0.3})
+            end
+        end)
+        TabBtn.MouseLeave:Connect(function()
+            if not Page.Visible then
+                UI:Tween(TabLabel, {TextColor3 = Color3.fromRGB(150,150,150)})
+                UI:Tween(Icon, {TextColor3 = Color3.fromRGB(150,150,150)})
+                UI:Tween(TabBtn, {BackgroundColor3 = CurrentTheme.Sidebar})
+                UI:Tween(TabStroke, {Transparency = 0.6})
+            end
         end)
 
         if #Window.Tabs == 0 then
-            Page.Visible = true
-            TabBtn.BackgroundColor3 = CurrentTheme.Element
-            TabBtn.TextColor3 = CurrentTheme.Text
+            UpdateState(true)
         end
 
-        table.insert(Window.Tabs, {Page = Page, Btn = TabBtn})
+        table.insert(Window.Tabs, {Page = Page, Btn = TabBtn, UpdateState = UpdateState})
 
         local Components = {}
 
@@ -776,6 +995,7 @@ function UI:CreateWindow(Name)
 
             local ScrollPadding = Instance.new("UIPadding")
             ScrollPadding.PaddingTop = UDim.new(0, 5)
+            ScrollPadding.PaddingLeft = UDim.new(0, 5)
             ScrollPadding.Parent = ScrollContainer
             
             local currentOptions = options
@@ -1784,7 +2004,7 @@ local function StartNomade()
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", false)
     end)
-    SendNotification("Nomade V30", "Sistema inicializado com sucesso.", 5)
+    SendNotification("Nomade V31", "Sistema inicializado com sucesso.", 5)
 
     -- Create Menu
     local Menu = UI:CreateWindow("NOMADE MENU")
@@ -1952,7 +2172,7 @@ local function StartNomade()
         WStroke.Parent = WatermarkFrame
         
         local WTitle = Instance.new("TextLabel")
-        WTitle.Text = "NOMADE V30 ULTIMATE"
+        WTitle.Text = "NOMADE V31 ULTIMATE"
         WTitle.Font = Enum.Font.GothamBlack
         WTitle.TextSize = 14
         WTitle.TextColor3 = Color3.fromRGB(120, 90, 255)
@@ -2084,7 +2304,7 @@ local function CreateLoader()
     
     -- Header Area
     local Title = Instance.new("TextLabel")
-    Title.Text = "NOMADE V30"
+    Title.Text = "NOMADE V31"
     Title.Font = Enum.Font.GothamBlack
     Title.TextSize = 32
     Title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -2137,7 +2357,8 @@ local function CreateLoader()
     
     local LogText = Instance.new("TextLabel")
     LogText.Text = [[
-• Reformulação Visual da Interface
+• Reformulação Visual da Interface (Botões Laterais)
+• Correção de Foto de Perfil (Profile Picture)
 • Correção da Lista de Jogadores (Tempo Real)
 • Adicionado ESP Esqueleto
 • Suporte Mobile Aprimorado
