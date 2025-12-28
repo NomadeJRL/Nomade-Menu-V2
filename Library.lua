@@ -1,17 +1,4 @@
---[[
-    NOMADE MENU - V41 SECURITY EDITION (ROBLOX LUAU)
-    TARGET: FPS GAMES (Universal)
-    STYLE: Modern / Material Design / Animated / Themed
-    AUTHOR: System Architect
-    
-    UPDATE LOG V41 (KEY SYSTEM & UI FIXES):
-    - CORREÇÃO: Popup de informações do perfil agora é renderizado no MainFrame para evitar clipping.
-    - FEATURE: Botão "Resetar Key" adicionado às configurações com dupla confirmação e exclusão de arquivos locais.
-    - AUTH: Sistema de persistência validado.
-    
-    UPDATE LOG V40 (PREVIOUS):
-    - CORREÇÃO: Estabilidade do Touch Fling.
-]]
+
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -3472,9 +3459,9 @@ function NomadeAuth.enc(data)
     end)..({ '', '==', '=' })[#data%3+1])
 end
 
--- Hidden Admin Check
+
 function NomadeAuth.IsAdmin(str)
-    local secret = {110, 111, 109, 97, 100, 101, 49, 50, 51, 97, 100, 109} -- "nomade123adm"
+    local secret = {110, 111, 109, 97, 100, 101, 49, 50, 51, 97, 100, 109}
     if #str ~= #secret then return false end
     for i = 1, #secret do
         if string.byte(str, i) ~= secret[i] then return false end
