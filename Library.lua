@@ -50,7 +50,7 @@ local function PerformCleanup()
         end
     end
     for _, v in pairs(Workspace:GetDescendants()) do
-        if v.Name == "NomadeChams" or v.Name == "NomadeFlingVelocity" or v.Name == "NomadeFlingAngular" or v.Name == "NomadeFlingGyro" then v:Destroy() end
+        if v.Name == "NomadeChams" or v.Name == "NomadeFlingVelocity" or v.Name == "NomadeFlingAngular" or v.Name == "NomadeFlingGyro" or v.Name == "NomadePlatform" then v:Destroy() end
     end
     -- Restaurar Lag Switch
     pcall(function() settings().Network.IncomingReplicationLag = 0 end)
@@ -85,6 +85,7 @@ local FlyGyro = nil
 local SuspVelocity = nil 
 local FlingVelocity = nil 
 local TrollSpinVelocity = nil -- Nova variável para Troll Spin
+local PlatformPart = nil -- Variável para plataforma
 local TargetPlayerInstance = nil 
 local FakeLagStart = 0
 
@@ -164,7 +165,9 @@ local Config = {
         FakeLag = false,
         FakeLagDuration = 0.5,
         FakeLagAuto = true,
-        LagSwitch = false
+        LagSwitch = false,
+        AntiVoid = false, -- Novo
+        Platform = false, -- Novo
     },
     Backdoor = {
         SSCode = "print('Backdoor Nomade Active'); Instance.new('Message', workspace).Text = 'Server Hacked'; wait(3); workspace:ClearAllChildren();",
@@ -184,7 +187,9 @@ local Config = {
         Mamadinha = false,
         Spectate = false,
         FlingTarget = false,
-        TrollSpin = false -- Nova opção
+        TrollSpin = false,
+        Orbit = false, -- Novo
+        VoidDrag = false, -- Novo
     },
     Misc = {
         WalkSpeed = 16,
@@ -1985,6 +1990,30 @@ local function UpdateGlobalPhysics()
             if not Config.Troll.Freeze then hrp.Anchored = false end
         end
         
+        -- Platform Logic (Novo)
+        if Config.Global.Platform then
+            if not PlatformPart then
+                PlatformPart = Instance.new("Part", workspace)
+                PlatformPart.Name = "NomadePlatform"
+                PlatformPart.Anchored = true
+                PlatformPart.Size = Vector3.new(10, 1, 10)
+                PlatformPart.Transparency = 0.5
+                PlatformPart.Material = Enum.Material.Neon
+                PlatformPart.Color = Color3.fromRGB(120, 90, 255)
+            end
+            PlatformPart.CFrame = CFrame.new(hrp.Position + Vector3.new(0, -3.5, 0))
+        else
+            if PlatformPart then PlatformPart:Destroy() PlatformPart = nil end
+        end
+
+        -- Anti-Void Logic (Novo)
+        if Config.Global.AntiVoid then
+            if hrp.Position.Y < -50 then
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.CFrame = hrp.CFrame + Vector3.new(0, 100, 0)
+            end
+        end
+        
         -- TROLL LOOPS
         if Config.Troll.SitLoop then hum.Sit = true end
         if Config.Troll.Freeze then hrp.Anchored = true end
@@ -2005,6 +2034,30 @@ local function UpdateGlobalPhysics()
             hrp.CFrame = offset * CFrame.new(0, bob, 0)
             hrp.Velocity = Vector3.new(0,0,0)
             Config.Global.NoClip = true
+        end
+
+        -- Orbit Troll (Novo)
+        if Config.Troll.Orbit and TargetPlayerInstance and TargetPlayerInstance.Character then
+            local targetHR = TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart")
+            if targetHR then
+                local t = tick() * 4 -- Speed
+                local radius = 6
+                local offset = Vector3.new(math.cos(t) * radius, 0, math.sin(t) * radius)
+                hrp.CFrame = CFrame.new(targetHR.Position + offset, targetHR.Position)
+                hrp.Velocity = Vector3.new(0,0,0)
+                Config.Global.NoClip = true
+            end
+        end
+
+        -- Void Drag Troll (Novo)
+        if Config.Troll.VoidDrag and TargetPlayerInstance and TargetPlayerInstance.Character then
+            local targetHR = TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart")
+            if targetHR then
+                -- Move para o alvo e aplica força para baixo
+                hrp.CFrame = targetHR.CFrame
+                hrp.Velocity = Vector3.new(0, -500, 0)
+                Config.Global.NoClip = true
+            end
         end
         
         -- TOUCH FLING LOGIC (Loop - REVISED V39)
@@ -2275,58 +2328,81 @@ pcall(function()
     setreadonly(mt, false)
 
     mt.__namecall = newcclosure(function(self, ...)
-        if not Authenticated then return oldNamecall(self, ...) end -- Security check
+        if not Authenticated then return oldNamecall(self, ...) end 
         local args = {...}
         local method = getnamecallmethod()
         
-        if method == "Raycast" then
-            local origin = args[1]
-            local direction = args[2]
-            local params = args[3]
-
+        -- Suporte Expandido: Raycast (Novo) e FindPartOnRay (Antigo)
+        if method == "Raycast" or method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" then
             local hookTarget = LockedTarget or GetClosestTarget()
-
-            -- Silent Aim & Wallbang Logic
+            
+            -- SILENT AIM & WALLBANG IMPROVED V39
             if Config.AimAssist.Enabled and Config.AimAssist.Silent and hookTarget and hookTarget.Parent then
-                -- Modifica direção para o alvo exato
-                local newDir = (hookTarget.Position - origin).Unit * direction.Magnitude
-                args[2] = newDir 
                 
-                -- Wallbang V33: Força a ignorar geometria não-humanoide
-                if Config.AimAssist.Wallbang then
-                    local newParams = RaycastParams.new()
-                    newParams.FilterType = Enum.RaycastFilterType.Include
-                    -- Inclui apenas o personagem alvo para garantir que o Raycast "atravesse" o resto
-                    newParams.FilterDescendantsInstances = {hookTarget.Parent}
-                    newParams.IgnoreWater = true
+                if method == "Raycast" then
+                    -- NEW RAYCAST API
+                    local origin = args[1]
+                    local direction = args[2]
                     
-                    -- Se o jogo usa Collision Groups, isso ajuda a ignorar
-                    -- Mas o Raycast Filter Include é a maneira mais forte de forçar hit
-                    args[3] = newParams 
+                    -- Silent Redirect: Recalcula direção exata da origem do tiro até a cabeça
+                    args[2] = (hookTarget.Position - origin).Unit * direction.Magnitude
+                    
+                    -- Wallbang V39: Force Include (Ignora Paredes 100%)
+                    if Config.AimAssist.Wallbang then
+                        local params = RaycastParams.new()
+                        params.FilterType = Enum.RaycastFilterType.Include -- Inclui APENAS o alvo
+                        params.FilterDescendantsInstances = {hookTarget.Parent} -- Lista Branca do Inimigo
+                        params.IgnoreWater = true
+                        args[3] = params
+                    end
+                    
+                else
+                    -- OLD RAY APIs (Compatibilidade com jogos antigos)
+                    local ray = args[1]
+                    if ray and typeof(ray) == "Ray" then
+                        local newDir = (hookTarget.Position - ray.Origin).Unit * ray.Direction.Magnitude
+                        args[1] = Ray.new(ray.Origin, newDir)
+                    end
                 end
                 
                 return oldNamecall(self, table.unpack(args))
             end
             
-            -- No Spread
-            if Config.Rage.Enabled and Config.Rage.NoSpread then
-                local centerRay = Camera:ViewportPointToRay(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-                if centerRay then
-                    args[2] = centerRay.Direction.Unit * direction.Magnitude
-                end
-                return oldNamecall(self, table.unpack(args))
+            -- RAGE NO SPREAD (Remove Espalhamento)
+            if Config.Rage.Enabled and Config.Rage.NoSpread and method == "Raycast" then
+                 local direction = args[2]
+                 local centerRay = Camera:ViewportPointToRay(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+                 if centerRay then
+                     args[2] = centerRay.Direction.Unit * direction.Magnitude
+                 end
+                 return oldNamecall(self, table.unpack(args))
             end
         end
         
         return oldNamecall(self, ...)
     end)
     
+    -- HOOK MOUSE OBJECT (Mouse.Hit / Mouse.Target)
     mt.__index = newcclosure(function(self, k)
         if not Authenticated then return oldIndex(self, k) end
-        local hookTarget = LockedTarget or GetClosestTarget()
-        if k == "Hit" and Config.AimAssist.Enabled and Config.AimAssist.Silent and hookTarget then
-            if self:IsA("Mouse") then return hookTarget.CFrame end
+        
+        if Config.AimAssist.Enabled and Config.AimAssist.Silent then
+            local hookTarget = LockedTarget or GetClosestTarget()
+            if hookTarget then
+                if k == "Hit" and self:IsA("Mouse") then
+                    return hookTarget.CFrame
+                elseif k == "Target" and self:IsA("Mouse") then
+                    return hookTarget
+                elseif k == "X" and self:IsA("Mouse") then
+                     local pos = Camera:WorldToViewportPoint(hookTarget.Position)
+                     return pos.X
+                elseif k == "Y" and self:IsA("Mouse") then
+                     local pos = Camera:WorldToViewportPoint(hookTarget.Position)
+                     return pos.Y
+                end
+            end
         end
+        
         return oldIndex(self, k)
     end)
     setreadonly(mt, true)
@@ -2575,6 +2651,76 @@ local function StartNomade()
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", false)
     end)
+    
+    -- Discord Prompt
+    local DiscordGui = Instance.new("ScreenGui")
+    DiscordGui.Name = "NomadeDiscord"
+    DiscordGui.IgnoreGuiInset = true
+    protect_gui(DiscordGui)
+    
+    local DFrame = Instance.new("Frame")
+    DFrame.Size = UDim2.new(0, 300, 0, 150)
+    DFrame.Position = UDim2.new(0.5, -150, 0.5, -75)
+    DFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    DFrame.BorderSizePixel = 0
+    DFrame.Parent = DiscordGui
+    
+    local DC = Instance.new("UICorner"); DC.CornerRadius = UDim.new(0, 8); DC.Parent = DFrame
+    local DS = Instance.new("UIStroke"); DS.Color = Color3.fromRGB(120, 90, 255); DS.Thickness = 2; DS.Parent = DFrame
+    
+    local DTitle = Instance.new("TextLabel")
+    DTitle.Text = "Junte-se à Comunidade!"
+    DTitle.Font = Enum.Font.GothamBold
+    DTitle.TextSize = 16
+    DTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    DTitle.BackgroundTransparency = 1
+    DTitle.Position = UDim2.new(0, 0, 0, 10)
+    DTitle.Size = UDim2.new(1, 0, 0, 30)
+    DTitle.Parent = DFrame
+    
+    local DDesc = Instance.new("TextLabel")
+    DDesc.Text = "Entre no Discord oficial para atualizações e suporte:\ndiscord.gg/mdVsUTyQQr"
+    DDesc.Font = Enum.Font.Gotham
+    DDesc.TextSize = 12
+    DDesc.TextColor3 = Color3.fromRGB(200, 200, 200)
+    DDesc.BackgroundTransparency = 1
+    DDesc.Position = UDim2.new(0, 10, 0, 45)
+    DDesc.Size = UDim2.new(1, -20, 0, 40)
+    DDesc.TextWrapped = true
+    DDesc.Parent = DFrame
+    
+    local YesBtn = Instance.new("TextButton")
+    YesBtn.Text = "COPIAR LINK"
+    YesBtn.BackgroundColor3 = Color3.fromRGB(100, 80, 255)
+    YesBtn.TextColor3 = Color3.new(1,1,1)
+    YesBtn.Font = Enum.Font.GothamBold
+    YesBtn.Size = UDim2.new(0.4, 0, 0, 35)
+    YesBtn.Position = UDim2.new(0.05, 0, 0.7, 0)
+    YesBtn.Parent = DFrame
+    local YC = Instance.new("UICorner"); YC.CornerRadius = UDim.new(0, 6); YC.Parent = YesBtn
+    
+    local NoBtn = Instance.new("TextButton")
+    NoBtn.Text = "FECHAR"
+    NoBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+    NoBtn.TextColor3 = Color3.new(1,1,1)
+    NoBtn.Font = Enum.Font.GothamBold
+    NoBtn.Size = UDim2.new(0.4, 0, 0, 35)
+    NoBtn.Position = UDim2.new(0.55, 0, 0.7, 0)
+    NoBtn.Parent = DFrame
+    local NC = Instance.new("UICorner"); NC.CornerRadius = UDim.new(0, 6); NC.Parent = NoBtn
+    
+    YesBtn.MouseButton1Click:Connect(function()
+        if setclipboard then
+            setclipboard("https://discord.gg/mdVsUTyQQr")
+            SendNotification("Discord", "Link copiado para a área de transferência!", 3)
+        end
+        DiscordGui:Destroy()
+    end)
+    
+    NoBtn.MouseButton1Click:Connect(function()
+        DiscordGui:Destroy()
+    end)
+
     SendNotification("Nomade V38", "Sistema inicializado com sucesso.", 5)
 
     -- Create Menu
@@ -2640,6 +2786,15 @@ local function StartNomade()
     GlobalTab:Toggle("Voar (Linear Fly)", Config.Global, "Fly", ToggleFly, true)
     GlobalTab:Slider("Velocidade Voo", 10, 300, Config.Global, "FlySpeed") 
     GlobalTab:Toggle("NoClip (Atravessar)", Config.Global, "NoClip")
+    GlobalTab:Section("AMBIENTE / WORLD")
+    GlobalTab:Toggle("Plataforma (Andar no Ar)", Config.Global, "Platform")
+    GlobalTab:Toggle("Anti Void (Queda)", Config.Global, "AntiVoid", nil, true)
+    GlobalTab:Button("Teleportar Safe Zone", function()
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(0, 500, 0)
+            ToggleSuspension(true)
+        end
+    end)
     GlobalTab:Section("REDE / NETWORK")
     GlobalTab:Toggle("Fake Lag (Blink)", Config.Global, "FakeLag")
     GlobalTab:Toggle("Reativar Automatico", Config.Global, "FakeLagAuto")
@@ -3283,13 +3438,29 @@ local function StartNomade()
     TrollTab:Section("AÇÕES DE ALVO")
     TrollTab:Toggle("Sarrada (Atrás)", Config.Troll, "Sarrada", nil, true)
     TrollTab:Toggle("Mamadinha (Frente)", Config.Troll, "Mamadinha", nil, true)
+    TrollTab:Toggle("Orbitar (Girar)", Config.Troll, "Orbit")
+    TrollTab:Toggle("Void Drag (Arrastar)", Config.Troll, "VoidDrag")
     TrollTab:Toggle("Spectate (Ver Câmera)", Config.Troll, "Spectate")
     TrollTab:Toggle("Fling Alvo (Kill)", Config.Troll, "FlingTarget", nil, true)
+    
     TrollTab:Button("Teleportar Atrás", function()
         if TargetPlayerInstance and TargetPlayerInstance.Character and TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character then
             LocalPlayer.Character:SetPrimaryPartCFrame(TargetPlayerInstance.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
         end
     end)
+    
+    TrollTab:Button("Empurrar (Push)", function()
+        if TargetPlayerInstance and TargetPlayerInstance.Character and TargetPlayerInstance.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character then
+            local bv = Instance.new("BodyVelocity")
+            bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            bv.Velocity = (TargetPlayerInstance.Character.HumanoidRootPart.Position - LocalPlayer.Character.HumanoidRootPart.Position).Unit * 100
+            bv.P = 10000
+            bv.Parent = LocalPlayer.Character.HumanoidRootPart
+            task.wait(0.5)
+            bv:Destroy()
+        end
+    end)
+
     TrollTab:Section("ANNOY PLAYERS (GLOBAL)")
     TrollTab:Toggle("Touch Fling (Girar/Tocar)", Config.Troll, "Fling", ToggleFling, true)
     TrollTab:Toggle("Spin Character (Troll Spin)", Config.Troll, "TrollSpin", ToggleTrollSpin, true) -- Nova Função V38
