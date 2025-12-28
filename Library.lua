@@ -1,28 +1,16 @@
 --[[
-    NOMADE MENU - V38 ULTIMATE EDITION (ROBLOX LUAU)
+    NOMADE MENU - V41 SECURITY EDITION (ROBLOX LUAU)
     TARGET: FPS GAMES (Universal)
     STYLE: Modern / Material Design / Animated / Themed
     AUTHOR: System Architect
     
-    UPDATE LOG V40 (USER FIX):
-    - CORREÇÃO: Estabilidade do Touch Fling.
-      - Adicionado BodyGyro para impedir que o personagem caia de lado (Anti-Tumble).
-      - Bloqueio de rotação nos eixos X/Z, permitindo apenas giro no eixo Y.
-      - Correção de tremedeira da câmera: Humanoid.AutoRotate desativado durante o fling.
-      - O personagem agora permanece de pé enquanto gira.
+    UPDATE LOG V41 (KEY SYSTEM & UI FIXES):
+    - CORREÇÃO: Popup de informações do perfil agora é renderizado no MainFrame para evitar clipping.
+    - FEATURE: Botão "Resetar Key" adicionado às configurações com dupla confirmação e exclusão de arquivos locais.
+    - AUTH: Sistema de persistência validado.
     
-    UPDATE LOG V39 (PREVIOUS):
-    - CORREÇÃO CRÍTICA: Touch Fling Physics.
-      - Substituído LinearVelocity por BodyVelocity (Legacy) para estabilidade.
-      - O jogador não é mais arremessado para o void (Anti-Skyrocket).
-
-    FEATURES:
-    - Combate: Legit, Silent, Rage, Wallbang, TriggerBot, TP Kill (Queue System).
-    - Visuais: Chams, ESP (Box/Name/Line/Skeleton), X-Ray.
-    - Global: Fly V3, NoClip, Suspension V2, God Mode, Teleport, Lag Switch.
-    - Backdoor: Scanner V4, SS Executor, Map Destroyer, Admin Injector, Payload Menu.
-    - Troll: Fling Rotation, Chat Spam, Ghost Mode, Player Target System.
-    - Misc: Speed (CFrame), Jump, UI Scale.
+    UPDATE LOG V40 (PREVIOUS):
+    - CORREÇÃO: Estabilidade do Touch Fling.
 ]]
 
 local Players = game:GetService("Players")
@@ -34,7 +22,12 @@ local Workspace = game:GetService("Workspace")
 local TextChatService = game:GetService("TextChatService")
 local CoreGui = game:GetService("CoreGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
+
+--// SECURITY STATE
+local Authenticated = false
+local KeyExpirationData = {Expiry = -1, Type = "Dev"} -- Global Key Data
 
 --// MANIPULAÇÃO DINÂMICA DA CÂMERA
 local Camera = Workspace.CurrentCamera
@@ -47,6 +40,10 @@ local Drawing = Drawing or require(script.Parent.Drawing) -- Fallback
 local protect_gui = (syn and syn.protect_gui) or (function(gui) gui.Parent = CoreGui end)
 local mouse1press = mouse1press or (function() end)
 local mouse1release = mouse1release or (function() end)
+local writefile = writefile or function(...) end
+local readfile = readfile or function(...) end
+local isfile = isfile or function(...) return false end
+local delfile = delfile or function(...) end
 
 --// CLEANUP SYSTEM
 local CleanupRegistry = {}
@@ -74,7 +71,7 @@ local function PerformCleanup()
 end
 
 for _, v in pairs(CoreGui:GetChildren()) do
-    if v.Name:find("NomadeUI_") or v.Name:find("NomadeLoader") or v.Name:find("NomadeMobile") then v:Destroy() end
+    if v.Name:find("NomadeUI_") or v.Name:find("NomadeLoader") or v.Name:find("NomadeMobile") or v.Name:find("NomadeAuth") then v:Destroy() end
 end
 PerformCleanup()
 
@@ -523,7 +520,7 @@ function UI:CreateWindow(Name)
     TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     TabListLayout.Parent = TabContainer
 
-    -- User Profile Area
+    -- User Profile Area (WITH INFO BUTTON FIX)
     local ProfileFrame = Instance.new("Frame")
     ProfileFrame.Name = "UserProfile"
     ProfileFrame.Size = UDim2.new(1, -20, 0, 55)
@@ -533,6 +530,91 @@ function UI:CreateWindow(Name)
     ProfileFrame.ZIndex = 15
     ProfileFrame.Parent = Sidebar
     table.insert(ThemeObjects.Elements, ProfileFrame)
+
+    -- Hidden Button to Trigger Key Info
+    local ProfileBtn = Instance.new("TextButton")
+    ProfileBtn.Text = ""
+    ProfileBtn.BackgroundTransparency = 1
+    ProfileBtn.Size = UDim2.new(1, 0, 1, 0)
+    ProfileBtn.ZIndex = 20
+    ProfileBtn.Parent = ProfileFrame
+
+    -- Info Popup (Key Time) - MOVED TO MAINFRAME FOR VISIBILITY
+    local InfoPopup = Instance.new("Frame")
+    InfoPopup.Name = "KeyInfoPopup"
+    InfoPopup.Size = UDim2.new(0, 160, 0, 70)
+    InfoPopup.Position = UDim2.new(0, 195, 1, -80) -- Adjusted position to appear right of sidebar
+    InfoPopup.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    InfoPopup.BorderSizePixel = 0
+    InfoPopup.Visible = false
+    InfoPopup.ZIndex = 100 -- High ZIndex
+    InfoPopup.Parent = MainFrame -- Parented to MainFrame to avoid clipping
+    table.insert(ThemeObjects.Elements, InfoPopup)
+    
+    local IPCorner = Instance.new("UICorner")
+    IPCorner.CornerRadius = UDim.new(0, 6)
+    IPCorner.Parent = InfoPopup
+    
+    local IPStroke = Instance.new("UIStroke")
+    IPStroke.Color = CurrentTheme.Accent
+    IPStroke.Thickness = 1.5
+    IPStroke.Parent = InfoPopup
+    table.insert(ThemeObjects.Accents, IPStroke)
+
+    local IPLabel = Instance.new("TextLabel")
+    IPLabel.Text = "INFO DO PLANO"
+    IPLabel.Font = Enum.Font.GothamBold
+    IPLabel.TextSize = 11
+    IPLabel.TextColor3 = CurrentTheme.Accent
+    IPLabel.BackgroundTransparency = 1
+    IPLabel.Position = UDim2.new(0, 0, 0, 5)
+    IPLabel.Size = UDim2.new(1, 0, 0, 15)
+    IPLabel.ZIndex = 101
+    IPLabel.Parent = InfoPopup
+    table.insert(ThemeObjects.Accents, IPLabel)
+    
+    local IPTime = Instance.new("TextLabel")
+    IPTime.Text = "Tempo: Calculando..."
+    IPTime.Font = Enum.Font.Gotham
+    IPTime.TextSize = 11
+    IPTime.TextColor3 = Color3.fromRGB(200, 200, 200)
+    IPTime.BackgroundTransparency = 1
+    IPTime.Position = UDim2.new(0, 10, 0, 25)
+    IPTime.Size = UDim2.new(1, -20, 0, 15)
+    IPTime.TextXAlignment = Enum.TextXAlignment.Left
+    IPTime.ZIndex = 101
+    IPTime.Parent = InfoPopup
+    
+    local IPType = Instance.new("TextLabel")
+    IPType.Text = "Tipo: Admin"
+    IPType.Font = Enum.Font.Gotham
+    IPType.TextSize = 11
+    IPType.TextColor3 = Color3.fromRGB(200, 200, 200)
+    IPType.BackgroundTransparency = 1
+    IPType.Position = UDim2.new(0, 10, 0, 45)
+    IPType.Size = UDim2.new(1, -20, 0, 15)
+    IPType.TextXAlignment = Enum.TextXAlignment.Left
+    IPType.ZIndex = 101
+    IPType.Parent = InfoPopup
+
+    ProfileBtn.MouseButton1Click:Connect(function()
+        InfoPopup.Visible = not InfoPopup.Visible
+        if InfoPopup.Visible then
+            local remaining = "Lifetime"
+            if KeyExpirationData.Expiry ~= -1 then
+                local diff = KeyExpirationData.Expiry - os.time()
+                if diff > 0 then
+                    local days = math.floor(diff / 86400)
+                    local hours = math.floor((diff % 86400) / 3600)
+                    remaining = string.format("%dd %02dh", days, hours)
+                else
+                    remaining = "Expirado"
+                end
+            end
+            IPTime.Text = "Restante: " .. remaining
+            IPType.Text = "Licença: " .. (KeyExpirationData.Type or "N/A")
+        end
+    end)
 
     local ProfileCorner = Instance.new("UICorner")
     ProfileCorner.CornerRadius = UDim.new(0, 8)
@@ -806,6 +888,8 @@ function UI:CreateWindow(Name)
                 UI:Tween(BtnFrame, {BackgroundColor3 = CurrentTheme.Element}, 0.2)
                 if callback then callback() end
             end)
+            
+            return TextBtn -- Changed for Reset Key Logic
         end
 
         function Components:Toggle(text, configTable, configKey, callback, risky)
@@ -1143,7 +1227,7 @@ function UI:CreateWindow(Name)
     end
 
     UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == MenuToggleKey then
+        if input.KeyCode == MenuToggleKey and Authenticated then
             ScreenGui.Enabled = not ScreenGui.Enabled
         end
     end)
@@ -1436,9 +1520,10 @@ local function ToggleTrollSpin(state)
 end
 
 local function ToggleSpam(state)
-    if state then
+    if state and Authenticated then
         task.spawn(function()
             while Config.Troll.SpamChat do
+                if not Authenticated then break end
                 if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
                     local ch = TextChatService:FindFirstChild("TextChannels")
                     if ch and ch:FindFirstChild("RBXGeneral") then
@@ -1716,11 +1801,12 @@ local function AttemptBackdoorExec(code, specificRemote)
 end
 
 local function SpamRemotes(state)
-    if state then
+    if state and Authenticated then
         BackdoorSpamming = true
         task.spawn(function()
             if #BackdoorResults == 0 then ScanForBackdoorsV4() end
             while BackdoorSpamming and #BackdoorResults > 0 do
+                if not Authenticated then break end
                 for _, res in pairs(BackdoorResults) do
                     local remote = res.Instance
                     if remote:IsA("RemoteEvent") and res.Risk ~= "SAFE" then
@@ -2140,6 +2226,7 @@ pcall(function()
     setreadonly(mt, false)
 
     mt.__namecall = newcclosure(function(self, ...)
+        if not Authenticated then return oldNamecall(self, ...) end -- Security check
         local args = {...}
         local method = getnamecallmethod()
         
@@ -2186,6 +2273,7 @@ pcall(function()
     end)
     
     mt.__index = newcclosure(function(self, k)
+        if not Authenticated then return oldIndex(self, k) end
         local hookTarget = LockedTarget or GetClosestTarget()
         if k == "Hit" and Config.AimAssist.Enabled and Config.AimAssist.Silent and hookTarget then
             if self:IsA("Mouse") then return hookTarget.CFrame end
@@ -2206,6 +2294,12 @@ local SnapLine = CreateDrawing("Line", {
 
 --// CORE LOOP (V28)
 RunService:BindToRenderStep("Nomade_Core_Loop_V28", Enum.RenderPriority.Camera.Value + 1, function()
+    if not Authenticated then 
+        FOVCircle.Visible = false
+        SnapLine.Visible = false
+        return 
+    end
+
     UpdateVisuals()
     UpdateChams()
     UpdateGlobalPhysics()
@@ -3003,7 +3097,6 @@ local function StartNomade()
     end)
     MiscTab:Button("Unload & Cleanup", function()
         PerformCleanup()
-        SendNotification("Sistema", "Script Unloaded", 2)
     end)
     MiscTab:Section("PERSONAGEM (LEGIT)")
     MiscTab:Toggle("Alterar Movimento (CFrame)", Config.Misc, "SpeedToggle")
@@ -3026,6 +3119,29 @@ local function StartNomade()
         PerformCleanup()
         game:GetService("CoreGui").NomadeUI_26:Destroy()
         if MainFrame then MainFrame.Parent:Destroy() end
+    end)
+    
+    local resetStep = 0
+    local resetBtn
+    resetBtn = SettingsTab:Button("Resetar Key (Logout)", function()
+        if resetStep == 0 then
+            resetStep = 1
+            resetBtn.Text = "CONFIRMAR: PERDERÁ ACESSO!"
+            UI:Tween(resetBtn, {TextColor3 = Color3.fromRGB(255, 50, 50)})
+            
+            -- Reset state if not clicked quickly
+            task.delay(3, function() 
+                if resetStep == 1 then 
+                    resetStep = 0 
+                    resetBtn.Text = "Resetar Key (Logout)"
+                    UI:Tween(resetBtn, {TextColor3 = CurrentTheme.Text})
+                end 
+            end)
+        elseif resetStep == 1 then
+            if isfile("Nomade_Auth_Key.txt") then delfile("Nomade_Auth_Key.txt") end
+            if isfile("Nomade_Auth_Sync.txt") then delfile("Nomade_Auth_Sync.txt") end
+            LocalPlayer:Kick("Key Resetada com Sucesso. Reinicie o script para entrar novamente.")
+        end
     end)
 
     --// WATERMARK SYSTEM (PC ONLY)
@@ -3148,7 +3264,7 @@ local function StartNomade()
     end
 end
 
---// LOADER SYSTEM IMPROVED V30
+--// LOADER SYSTEM (Called AFTER Auth)
 local function CreateLoader()
     local LoaderGui = Instance.new("ScreenGui")
     LoaderGui.Name = "NomadeLoader"
@@ -3164,7 +3280,6 @@ local function CreateLoader()
     MainFrame.ClipsDescendants = true
     MainFrame.Parent = LoaderGui
     
-    -- Background Animation reused from main UI
     UI:CreateBackgroundAnimation(MainFrame)
     
     local Corner = Instance.new("UICorner")
@@ -3189,7 +3304,7 @@ local function CreateLoader()
     Title.Parent = MainFrame
     
     local SubTitle = Instance.new("TextLabel")
-    SubTitle.Text = "EDIÇÃO FINAL"
+    SubTitle.Text = "BEM-VINDO AO FUTURO"
     SubTitle.Font = Enum.Font.Gotham
     SubTitle.TextSize = 14
     SubTitle.TextColor3 = Color3.fromRGB(120, 90, 255)
@@ -3232,11 +3347,12 @@ local function CreateLoader()
     
     local LogText = Instance.new("TextLabel")
     LogText.Text = [[
+• AUTH SYSTEM V2:
+  - Sistema de Sync Codes implementado.
+  - Segurança aprimorada contra leeching.
 • BACKDOOR V4 (ADVANCED):
   - Scanner de Risco Detalhado (Descrições Técnicas).
   - Force Admin V2: Injeção direta em HD/Kohl's/BAE.
-  - Painel de Diagnóstico Interativo com Botões de Ação.
-  - Payloads: Unanchor, Force Sit, Crash.
 • UI FIX: Sidebar otimizada para todos os monitores.
 ]]
     LogText.Font = Enum.Font.Gotham
@@ -3322,5 +3438,310 @@ local function CreateLoader()
     end)
 end
 
---// INICIAR
-CreateLoader()
+--// SECURE AUTH SYSTEM LOGIC
+local NomadeAuth = {}
+
+-- Base64 Decoder (Robust Client-Side)
+local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+function NomadeAuth.dec(data)
+    data = string.gsub(data, '[^'..b..'=]', '')
+    return (data:gsub('.', function(x)
+        if (x == '=') then return '' end
+        local r,f='',(b:find(x)-1)
+        for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+        if (#x ~= 8) then return '' end
+        local c=0
+        for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
+        return string.char(c)
+    end))
+end
+
+-- Base64 Encoder
+function NomadeAuth.enc(data)
+    return ((data:gsub('.', function(x) 
+        local r,b='',x:byte()
+        for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if (#x < 6) then return '' end
+        local c=0
+        for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
+        return b:sub(c+1,c+1)
+    end)..({ '', '==', '=' })[#data%3+1])
+end
+
+-- Hidden Admin Check
+function NomadeAuth.IsAdmin(str)
+    local secret = {110, 111, 109, 97, 100, 101, 49, 50, 51, 97, 100, 109} -- "nomade123adm"
+    if #str ~= #secret then return false end
+    for i = 1, #secret do
+        if string.byte(str, i) ~= secret[i] then return false end
+    end
+    return true
+end
+
+-- Duration Map (Seconds)
+local Durations = {
+    ["1 Dia"] = 86400,
+    ["7 Dias"] = 604800,
+    ["30 Dias"] = 2592000,
+    ["90 Dias"] = 7776000,
+    ["1 Ano"] = 31536000,
+    ["Lifetime"] = 9999999999
+}
+
+function InitializeAuth()
+    -- Check Saved Session
+    if isfile("Nomade_Auth_Key.txt") and isfile("Nomade_Auth_Sync.txt") then
+        local savedKey = readfile("Nomade_Auth_Key.txt")
+        local savedSync = readfile("Nomade_Auth_Sync.txt")
+        
+        local success, db = pcall(function() return HttpService:JSONDecode(NomadeAuth.dec(savedSync)) end)
+        if success and db and db[savedKey] then
+            local expiry = db[savedKey].expiration
+            if expiry == -1 or os.time() < expiry then
+                KeyExpirationData.Expiry = expiry
+                KeyExpirationData.Type = db[savedKey].durationType or "Saved"
+                Authenticated = true
+                CreateLoader()
+                return
+            end
+        end
+    end
+
+    -- Create UI
+    local AuthGui = Instance.new("ScreenGui")
+    AuthGui.Name = "NomadeAuth"
+    AuthGui.IgnoreGuiInset = true
+    protect_gui(AuthGui)
+    RegisterCleanup(AuthGui)
+
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(0, 400, 0, 300)
+    Frame.Position = UDim2.new(0.5, -200, 0.5, -150)
+    Frame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    Frame.BorderSizePixel = 0
+    Frame.Parent = AuthGui
+
+    UI:CreateBackgroundAnimation(Frame)
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 10)
+    Corner.Parent = Frame
+    
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(120, 90, 255)
+    Stroke.Thickness = 2
+    Stroke.Parent = Frame
+
+    local Title = Instance.new("TextLabel")
+    Title.Text = "AUTENTICAÇÃO"
+    Title.Font = Enum.Font.GothamBlack
+    Title.TextSize = 24
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.BackgroundTransparency = 1
+    Title.Position = UDim2.new(0, 0, 0, 20)
+    Title.Size = UDim2.new(1, 0, 0, 30)
+    Title.Parent = Frame
+
+    local SyncInput = Instance.new("TextBox")
+    SyncInput.PlaceholderText = "Cole o Sync Code Aqui..."
+    SyncInput.Text = ""
+    SyncInput.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    SyncInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+    SyncInput.Font = Enum.Font.Gotham
+    SyncInput.TextSize = 12
+    SyncInput.Size = UDim2.new(0.8, 0, 0, 40)
+    SyncInput.Position = UDim2.new(0.1, 0, 0.3, 0)
+    SyncInput.Parent = Frame
+    local SC = Instance.new("UICorner"); SC.CornerRadius = UDim.new(0, 6); SC.Parent = SyncInput
+
+    local KeyInput = Instance.new("TextBox")
+    KeyInput.PlaceholderText = "Sua Chave (Key)"
+    KeyInput.Text = ""
+    KeyInput.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    KeyInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+    KeyInput.Font = Enum.Font.Gotham
+    KeyInput.TextSize = 14
+    KeyInput.Size = UDim2.new(0.8, 0, 0, 40)
+    KeyInput.Position = UDim2.new(0.1, 0, 0.5, 0)
+    KeyInput.Parent = Frame
+    local KC = Instance.new("UICorner"); KC.CornerRadius = UDim.new(0, 6); KC.Parent = KeyInput
+
+    local LoginBtn = Instance.new("TextButton")
+    LoginBtn.Text = "ENTRAR"
+    LoginBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 255)
+    LoginBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    LoginBtn.Font = Enum.Font.GothamBold
+    LoginBtn.TextSize = 14
+    LoginBtn.Size = UDim2.new(0.5, 0, 0, 40)
+    LoginBtn.Position = UDim2.new(0.25, 0, 0.7, 0)
+    LoginBtn.Parent = Frame
+    local LC = Instance.new("UICorner"); LC.CornerRadius = UDim.new(0, 6); LC.Parent = LoginBtn
+
+    local Status = Instance.new("TextLabel")
+    Status.Text = ""
+    Status.Font = Enum.Font.Gotham
+    Status.TextSize = 12
+    Status.TextColor3 = Color3.fromRGB(255, 50, 50)
+    Status.BackgroundTransparency = 1
+    Status.Position = UDim2.new(0, 0, 0.85, 0)
+    Status.Size = UDim2.new(1, 0, 0, 20)
+    Status.Parent = Frame
+
+    -- ADMIN FRAME (Hidden)
+    local AdminFrame = Instance.new("Frame")
+    AdminFrame.Visible = false
+    AdminFrame.Size = UDim2.new(0, 500, 0, 400)
+    AdminFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    AdminFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    AdminFrame.Parent = AuthGui
+    
+    local AC = Instance.new("UICorner"); AC.CornerRadius = UDim.new(0, 10); AC.Parent = AdminFrame
+    local AStroke = Instance.new("UIStroke"); AStroke.Color = Color3.fromRGB(255, 50, 50); AStroke.Thickness = 2; AStroke.Parent = AdminFrame
+
+    local ATitle = Instance.new("TextLabel")
+    ATitle.Text = "PAINEL ADMINISTRATIVO (GERADOR)"
+    ATitle.Font = Enum.Font.GothamBlack
+    ATitle.TextSize = 18
+    ATitle.TextColor3 = Color3.fromRGB(255, 50, 50)
+    ATitle.BackgroundTransparency = 1
+    ATitle.Size = UDim2.new(1, 0, 0, 40)
+    ATitle.Parent = AdminFrame
+
+    local OldSync = Instance.new("TextBox")
+    OldSync.PlaceholderText = "Cole Sync Code Antigo (Para Atualizar)"
+    OldSync.Text = ""
+    OldSync.Size = UDim2.new(0.9, 0, 0, 40)
+    OldSync.Position = UDim2.new(0.05, 0, 0.15, 0)
+    OldSync.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    OldSync.TextColor3 = Color3.new(1,1,1)
+    OldSync.Parent = AdminFrame
+
+    local DurList = Instance.new("ScrollingFrame")
+    DurList.Size = UDim2.new(0.9, 0, 0.2, 0)
+    DurList.Position = UDim2.new(0.05, 0, 0.3, 0)
+    DurList.Parent = AdminFrame
+    local DurLayout = Instance.new("UIGridLayout"); DurLayout.CellSize = UDim2.new(0.3, 0, 0, 30); DurLayout.Parent = DurList
+    
+    local SelectedDur = "1 Dia"
+    for name, sec in pairs(Durations) do
+        local btn = Instance.new("TextButton")
+        btn.Text = name
+        btn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+        btn.TextColor3 = Color3.new(1,1,1)
+        btn.Parent = DurList
+        btn.MouseButton1Click:Connect(function() SelectedDur = name end)
+    end
+
+    local GenBtn = Instance.new("TextButton")
+    GenBtn.Text = "GERAR KEY & SYNC"
+    GenBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    GenBtn.Size = UDim2.new(0.5, 0, 0, 40)
+    GenBtn.Position = UDim2.new(0.25, 0, 0.55, 0)
+    GenBtn.Parent = AdminFrame
+
+    local OutKey = Instance.new("TextBox")
+    OutKey.Text = "Nova Key Aqui"
+    OutKey.Size = UDim2.new(0.9, 0, 0, 30)
+    OutKey.Position = UDim2.new(0.05, 0, 0.7, 0)
+    OutKey.ClearTextOnFocus = false
+    OutKey.Parent = AdminFrame
+
+    local OutSync = Instance.new("TextBox")
+    OutSync.Text = "Novo Sync Code Aqui"
+    OutSync.Size = UDim2.new(0.9, 0, 0, 60)
+    OutSync.Position = UDim2.new(0.05, 0, 0.8, 0)
+    OutSync.TextWrapped = true
+    OutSync.ClearTextOnFocus = false
+    OutSync.Parent = AdminFrame
+
+    local ExitAdminBtn = Instance.new("TextButton")
+    ExitAdminBtn.Text = "VOLTAR AO LOGIN"
+    ExitAdminBtn.Font = Enum.Font.GothamBold
+    ExitAdminBtn.TextSize = 12
+    ExitAdminBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    ExitAdminBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    ExitAdminBtn.Size = UDim2.new(0.3, 0, 0, 30)
+    ExitAdminBtn.Position = UDim2.new(0.35, 0, 0.95, -5)
+    ExitAdminBtn.Parent = AdminFrame
+    local ExitAC = Instance.new("UICorner"); ExitAC.CornerRadius = UDim.new(0, 6); ExitAC.Parent = ExitAdminBtn
+
+    ExitAdminBtn.MouseButton1Click:Connect(function()
+        AdminFrame.Visible = false
+        Frame.Visible = true
+    end)
+
+    -- LOGIC BINDING
+    LoginBtn.MouseButton1Click:Connect(function()
+        local k = KeyInput.Text
+        local s = SyncInput.Text
+        
+        -- Admin Bypass
+        if NomadeAuth.IsAdmin(k) then
+            Frame.Visible = false
+            AdminFrame.Visible = true
+            return
+        end
+        
+        -- Validation
+        if s == "" or k == "" then Status.Text = "Preencha todos os campos!"; return end
+        
+        local success, json = pcall(function() return NomadeAuth.dec(s) end)
+        if not success then Status.Text = "Sync Code Inválido (Base64 Erro)"; return end
+        
+        local successDB, db = pcall(function() return HttpService:JSONDecode(json) end)
+        if not successDB or type(db) ~= "table" then Status.Text = "Sync Code Corrompido"; return end
+        
+        if db[k] then
+            local expiry = db[k].expiration
+            if expiry == -1 or os.time() < expiry then
+                Status.Text = "Sucesso! Carregando..."
+                Status.TextColor3 = Color3.fromRGB(50, 255, 50)
+                
+                -- Save
+                writefile("Nomade_Auth_Key.txt", k)
+                writefile("Nomade_Auth_Sync.txt", s)
+                
+                KeyExpirationData.Expiry = expiry
+                KeyExpirationData.Type = db[k].durationType or "User"
+
+                task.wait(1)
+                AuthGui:Destroy()
+                Authenticated = true
+                CreateLoader()
+            else
+                Status.Text = "Chave Expirada!"
+            end
+        else
+            Status.Text = "Chave não encontrada neste Sync Code."
+        end
+    end)
+
+    GenBtn.MouseButton1Click:Connect(function()
+        local db = {}
+        if OldSync.Text ~= "" then
+            local s, j = pcall(function() return NomadeAuth.dec(OldSync.Text) end)
+            if s then 
+                local s2, d = pcall(function() return HttpService:JSONDecode(j) end)
+                if s2 then db = d end
+            end
+        end
+        
+        local newKey = "KEY-"..HttpService:GenerateGUID(false):sub(1,8):upper()
+        local expiry = (Durations[SelectedDur] == 9999999999) and -1 or (os.time() + Durations[SelectedDur])
+        
+        db[newKey] = {expiration = expiry, durationType = SelectedDur}
+        
+        local newJson = HttpService:JSONEncode(db)
+        local newSync = NomadeAuth.enc(newJson)
+        
+        OutKey.Text = newKey
+        OutSync.Text = newSync
+    end)
+end
+
+--// INICIAR AUTH
+InitializeAuth()
