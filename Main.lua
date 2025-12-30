@@ -1,9 +1,10 @@
 --!native
 --!optimize 2
 --[[
-    ROBLOX-CORE-COMPILER // DIAGNOSTIC COMMAND INTERFACE (GUI) b v1.8 (PT-BR)
+    ROBLOX-CORE-COMPILER // DIAGNOSTIC COMMAND INTERFACE (GUI) b v3.7 (PT-BR)
     TARGET: HEROES BATTLEGROUNDS
-    UPDATE: PORTUGUESE TRANSLATION + MOBILE WIDGET FIX
+    UPDATE: INPUT DETECTION FIX (M1 IGNORES GAMEPROCESSED)
+    NOTE: AGGRESSIVE ATTACK RECOGNITION ADDED
     STATUS: EXTREME OPTIMIZATION (O3)
 ]]
 
@@ -130,8 +131,8 @@ InitializeLoader()
 
 -- // MAIN INTERFACE CREATION //
 local WindowOptions = {
-    Title = "DCI (GUI) b v1.8 " .. (LoaderConfig.IsMobile and "[MOBILE]" or "[PC]"),
-    SubTitle = "Protocolo de Segurança",
+    Title = "DCI (GUI) b v3.7 " .. (LoaderConfig.IsMobile and "[MOBILE]" or "[PC]"),
+    SubTitle = "Attack Detection Fix",
     TabWidth = 160,
     Size = LoaderConfig.IsMobile and UDim2.fromOffset(480, 320) or UDim2.fromOffset(580, 460),
     Acrylic = not LoaderConfig.IsMobile, 
@@ -143,9 +144,10 @@ local Window = Fluent:CreateWindow(WindowOptions)
 
 -- // GLOBAL STATE //
 getgenv().CoreState = {
-    AutoBlock = false,
-    AutoAttack = false,
-    AttackRange = 8,
+    AutoBlockAll = false,      
+    
+    LastAttackTime = 0, -- Replaces boolean toggle for better precision
+    
     AttackSpeed = false,
     AttackSpeedValue = 2.5,
     SpeedHack = false,
@@ -155,8 +157,8 @@ getgenv().CoreState = {
     CamLock = false,
     CamLockTarget = nil,
     CamLockKey = Enum.KeyCode.Q,
-    CamSmoothness = 0.14, -- Slightly smoother
-    CamLockYOffset = 1.8 -- Defaults to upper chest/head area for better visibility
+    CamSmoothness = 0.14,
+    CamLockYOffset = 1.8 
 }
 
 -- // UTILITY & OPTIMIZATION //
@@ -165,9 +167,9 @@ local mathsqrt = math.sqrt
 local tablefind = table.find
 local VIM = VirtualInputManager
 local BLOCK_KEY = Enum.KeyCode.F
-local SAFE_ZONE = 7
+local SAFE_ZONE = 7 
 local SAFE_ZONE_SQ = SAFE_ZONE * SAFE_ZONE
-local MAX_DETECTION_RANGE = 25
+local MAX_DETECTION_RANGE = 30 
 local MAX_DETECTION_SQ = MAX_DETECTION_RANGE * MAX_DETECTION_RANGE
 
 local function IsAlive(char)
@@ -179,6 +181,7 @@ local function GetClosestEnemy(range, fovCheck)
     local closest, minDist = nil, range or 9e9
     local myRoot = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
+    local mouse = Players.LocalPlayer:GetMouse()
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= Players.LocalPlayer then
@@ -186,11 +189,23 @@ local function GetClosestEnemy(range, fovCheck)
             if IsAlive(char) then
                 local root = char.HumanoidRootPart
                 local dist = (root.Position - myRoot.Position).Magnitude
-                if dist < minDist then
+                
+                if dist < range then
                     if fovCheck then
-                        local _, onScreen = Camera:WorldToScreenPoint(root.Position)
-                        if onScreen then closest = player; minDist = dist end
-                    else closest = player; minDist = dist end
+                        local screenPos, onScreen = Camera:WorldToScreenPoint(root.Position)
+                        if onScreen then
+                            local mouseDist = (Vector2.new(mouse.X, mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                            if mouseDist < minDist then
+                                closest = player
+                                minDist = mouseDist
+                            end
+                        end
+                    else 
+                        if dist < minDist then
+                            closest = player
+                            minDist = dist 
+                        end
+                    end
                 end
             end
         end
@@ -198,8 +213,7 @@ local function GetClosestEnemy(range, fovCheck)
     return closest
 end
 
--- // CAMLOCK SUBSYSTEM (MOVABLE / FLUID + HEIGHT OFFSET) //
--- Using RenderStepped + 1 to override camera but using LERP for movable feel
+-- // CAMLOCK SUBSYSTEM //
 RunService:BindToRenderStep("DCI_CamLock", Enum.RenderPriority.Camera.Value + 1, function()
     if getgenv().CoreState.CamLock then
         local target = getgenv().CoreState.CamLockTarget
@@ -208,19 +222,13 @@ RunService:BindToRenderStep("DCI_CamLock", Enum.RenderPriority.Camera.Value + 1,
             if targetRoot then
                 local cam = Workspace.CurrentCamera
                 local currentPos = cam.CFrame.Position
-                
-                -- Offset Logic: Adds height to the target position so we don't look at feet/waist
                 local yOffset = getgenv().CoreState.CamLockYOffset or 0
                 local targetPos = targetRoot.Position + Vector3.new(0, yOffset, 0)
-                
-                -- SMOOTH LOCK LOGIC (Allows "Movement" feeling)
                 local smoothFactor = getgenv().CoreState.CamSmoothness or 0.18
                 local desiredLook = CFrame.new(currentPos, targetPos)
-                
                 cam.CFrame = cam.CFrame:Lerp(desiredLook, smoothFactor)
             end
         else
-            -- Auto-disable if target lost
             getgenv().CoreState.CamLock = false
             getgenv().CoreState.CamLockTarget = nil
         end
@@ -233,8 +241,9 @@ local function ToggleCamLock()
         getgenv().CoreState.CamLockTarget = nil
         Fluent:Notify({Title = "CamLock", Content = "Desbloqueado", Duration = 1})
     else
-        -- Search Radius: 200 Studs
-        local target = GetClosestEnemy(200, true) 
+        local target = GetClosestEnemy(2000, true) 
+        if not target then target = GetClosestEnemy(50, false) end
+
         if target then
             getgenv().CoreState.CamLock = true
             getgenv().CoreState.CamLockTarget = target
@@ -245,7 +254,7 @@ local function ToggleCamLock()
     end
 end
 
--- // MOBILE CONTROLLER (WIDGET - ENHANCED & FIXED) //
+-- // MOBILE CONTROLLER (WIDGET) //
 if LoaderConfig.IsMobile then
     if CoreGui:FindFirstChild("DCI_MobileWidget") then CoreGui.DCI_MobileWidget:Destroy() end
 
@@ -275,12 +284,12 @@ if LoaderConfig.IsMobile then
     Instance.new("UICorner", MenuBtn).CornerRadius = UDim.new(1, 0)
     Instance.new("UIStroke", MenuBtn).Color = Color3.fromRGB(0, 255, 100)
 
-    -- LOCK BUTTON (Visual State)
+    -- LOCK BUTTON
     local LockBtn = Instance.new("TextButton")
     LockBtn.Size = UDim2.new(0, 50, 0, 50)
     LockBtn.Position = UDim2.new(0, 60, 0, 0)
     LockBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    LockBtn.TextColor3 = Color3.fromRGB(200, 200, 200) -- Default Grey
+    LockBtn.TextColor3 = Color3.fromRGB(200, 200, 200) 
     LockBtn.Text = "LOCK"
     LockBtn.Font = Enum.Font.GothamBlack
     LockBtn.TextSize = 10
@@ -290,10 +299,10 @@ if LoaderConfig.IsMobile then
     local LockStroke = Instance.new("UIStroke", LockBtn)
     LockStroke.Color = Color3.fromRGB(200, 200, 200)
 
-    -- STATE UPDATER LOOP (Visual Feedback)
+    -- STATE UPDATER LOOP 
     RunService.RenderStepped:Connect(function()
         if getgenv().CoreState.CamLock and getgenv().CoreState.CamLockTarget then
-            LockBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100) -- Green when locked
+            LockBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
             LockBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             LockBtn.Text = "ATIVO"
             LockStroke.Color = Color3.fromRGB(0, 255, 100)
@@ -325,13 +334,12 @@ if LoaderConfig.IsMobile then
         end
     end)
 
-    -- MENU CLICK (FIXED RELIABILITY)
+    -- MENU CLICK
     local MainGUIReference = nil
     
     local function FindMainGUI()
         for _, gui in ipairs(CoreGui:GetChildren()) do
             if gui:IsA("ScreenGui") and gui.Name ~= "DCI_MobileWidget" and gui.Name ~= "DCI_Loader" then
-                -- Try to find our specific title in the GUI
                 for _, obj in ipairs(gui:GetDescendants()) do
                     if obj:IsA("TextLabel") and obj.Text == WindowOptions.Title then
                         return gui
@@ -343,52 +351,53 @@ if LoaderConfig.IsMobile then
     end
 
     MenuBtn.Activated:Connect(function()
-        if not MainGUIReference then
-            MainGUIReference = FindMainGUI()
-        end
-        
+        if not MainGUIReference then MainGUIReference = FindMainGUI() end
         if MainGUIReference then
             MainGUIReference.Enabled = not MainGUIReference.Enabled
-            -- Blur Fix
-            if not MainGUIReference.Enabled and Lighting:FindFirstChild("FluentAcrylicBlur") then
-                Lighting.FluentAcrylicBlur.Enabled = false
+            -- [FIX: BLUR REMOVAL ON CLOSE]
+            if not MainGUIReference.Enabled then
+                local blur = Lighting:FindFirstChild("FluentAcrylicBlur")
+                if blur then blur.Enabled = false end
             end
         else
-            -- If reference lost, try one more time
             MainGUIReference = FindMainGUI()
-            if MainGUIReference then
-                MainGUIReference.Enabled = not MainGUIReference.Enabled
-            else
+            if MainGUIReference then MainGUIReference.Enabled = not MainGUIReference.Enabled else
                 Fluent:Notify({Title = "ERRO", Content = "GUI não encontrada.", Duration = 2})
             end
         end
     end)
-
-    -- LOCK CLICK
-    LockBtn.Activated:Connect(function()
-        ToggleCamLock()
-    end)
+    LockBtn.Activated:Connect(function() ToggleCamLock() end)
 end
 
--- // DATABASE: KNOWN ATTACKS //
+-- // DATABASE: KNOWN ATTACKS (EXTENDED) //
 local KNOWN_ATTACKS = {
+    -- [[ SET A (Combos Normais/M1) ]] --
     ["15322492552"] = true, ["15322493614"] = true, ["15322494803"] = true, ["15322496218"] = true,
+    -- [[ SET B ]] --
     ["16605699401"] = true, ["16605828199"] = true, ["16605774003"] = true, ["14989482371"] = true,
+    -- [[ SET C ]] --
     ["16146436596"] = true, ["16146437896"] = true, ["16146439328"] = true, ["16146440723"] = true,
+    -- [[ SET D ]] --
     ["18616154806"] = true, ["18616155940"] = true, ["18679858193"] = true, ["18679241274"] = true,
+    -- [[ SET E (Saitama) ]] --
     ["18833984494"] = true, ["18833986974"] = true, ["18833989817"] = true, ["18833991833"] = true,
+    
+    -- [[ SET F (IDs Longos/Novos) ]] --
     ["109118299683778"] = true, ["134710131702457"] = true, ["129007872635806"] = true, ["97193330603283"] = true,
+    -- [[ SET G (IDs Longos/Novos 2) ]] --
     ["71064390671639"] = true, ["113302934282694"] = true, ["103692467047605"] = true, ["118311121122152"] = true,
+    ["110878031211717"] = true,
+    
+    -- [[ DASH ATTACKS (Priority Overrides) ]] --
     ["13917336710"] = true, ["15271714828"] = true, ["15271719973"] = true, ["15271729409"] = true,
-    ["18619394783"] = true, ["18838849992"] = true, ["110878031211717"] = true,
-    ["10466974130"] = true, ["10468665991"] = true, ["10468660855"] = true,
-    ["10466035041"] = true, ["10466037722"] = true, ["10466039534"] = true, ["10466041632"] = true
+    ["18619394783"] = true, ["18838849992"] = true,
 }
 
 local IGNORED_ANIMS = {
     ["run"] = true, ["walk"] = true, ["idle"] = true,
     ["jump"] = true, ["fall"] = true, ["climb"] = true,
-    ["swim"] = true, ["dash_forward"] = false
+    ["swim"] = true, ["dash_forward"] = false, 
+    ["movement"] = true, ["running"] = true, ["walking"] = true
 }
 local ACTION_PRIORITIES = {
     [Enum.AnimationPriority.Action] = true, [Enum.AnimationPriority.Action2] = true,
@@ -397,8 +406,12 @@ local ACTION_PRIORITIES = {
 
 local isBlocking = false
 local function GetCleanID(animationTrack)
-    if not animationTrack.Animation then return nil end
-    return strmatch(animationTrack.Animation.AnimationId, "%d+") 
+    if not animationTrack then return nil end
+    local anim = animationTrack.Animation
+    if not anim then return nil end
+    local id = anim.AnimationId
+    if not id or #id == 0 then return nil end
+    return strmatch(id, "%d+")
 end
 
 local function GetClosestPartDistance(character, rootPos)
@@ -421,8 +434,11 @@ local function GetClosestPartDistance(character, rootPos)
 end
 
 local function ToggleBlock(state)
+    -- Prevent state flapping
     if isBlocking == state then return end
     isBlocking = state
+    
+    -- VIM calls are instant; removed any potential throttle logic here to match '0 delay' requirement
     if state then
         VIM:SendKeyEvent(true, BLOCK_KEY, false, game)
     else
@@ -430,8 +446,18 @@ local function ToggleBlock(state)
     end
 end
 
+-- [REFACTORED: AUTOBLOCK ONLY]
 local function ProcessAutoBlock()
-    if not getgenv().CoreState.AutoBlock then 
+    local state = getgenv().CoreState
+    
+    -- CRITICAL: IF MANUAL ATTACK DETECTED (WITHIN 0.8s), DISABLE BLOCK
+    -- This uses the timestamp instead of a potentially delayed task
+    if (tick() - (state.LastAttackTime or 0)) < 0.8 then
+        if isBlocking then ToggleBlock(false) end
+        return
+    end
+
+    if not state.AutoBlockAll then 
         if isBlocking then ToggleBlock(false) end
         return 
     end
@@ -459,29 +485,57 @@ local function ProcessAutoBlock()
                 local animator = hum:FindFirstChildOfClass("Animator")
                 if animator then
                     local tracks = animator:GetPlayingAnimationTracks()
+                    local anyThreatDetected = false
+                    
                     for t = 1, #tracks do
                         local track = tracks[t]
                         local alertArmed = false
+                        local isDatabaseMatch = false 
+                        
+                        -- METHOD 1: DATABASE
                         local id = GetCleanID(track)
-                        if id and KNOWN_ATTACKS[id] then alertArmed = true end
+                        if id and KNOWN_ATTACKS[id] then 
+                            alertArmed = true 
+                            isDatabaseMatch = true 
+                        end
+
+                        -- METHOD 2: HEURISTIC
                         if not alertArmed then
                             local name = track.Name:lower()
-                            if not IGNORED_ANIMS[name] and ACTION_PRIORITIES[track.Priority] then
+                            local isWalkAnim = IGNORED_ANIMS[name] or name:find("walk") or name:find("run")
+                            if not isWalkAnim and ACTION_PRIORITIES[track.Priority] then
                                 alertArmed = true
                             end
                         end
+
+                        -- METHOD 3: DASH/PROXIMITY
+                        if not alertArmed then
+                            local name = track.Name:lower()
+                            if not IGNORED_ANIMS[name] then
+                                alertArmed = true
+                            end
+                        end
+
                         if alertArmed then
+                            local threshold = SAFE_ZONE_SQ
+                            if isDatabaseMatch then
+                                threshold = MAX_DETECTION_SQ 
+                            end
+
                             local physicalDistSq = GetClosestPartDistance(char, myPos)
-                            if physicalDistSq <= SAFE_ZONE_SQ then
-                                shouldBlock = true; break 
+                            if physicalDistSq <= threshold then
+                                anyThreatDetected = true
+                                shouldBlock = true; 
                             end
                         end
                     end
+                    if anyThreatDetected then break end
                 end
             end
         end
         if shouldBlock then break end
     end
+    
     ToggleBlock(shouldBlock)
 end
 
@@ -503,23 +557,11 @@ local function ProcessAttackSpeed()
     end)
 end
 
-local function ProcessAutoAttack()
-    if not getgenv().CoreState.AutoAttack then return end
-    local target = GetClosestEnemy(getgenv().CoreState.AttackRange, true)
-    if target and target.Character then
-        local myRoot = Players.LocalPlayer.Character.HumanoidRootPart
-        local targetRoot = target.Character.HumanoidRootPart
-        myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
-        mouse1click() 
-    end
-end
-
--- [ESP MODULE - TARGET HIGHLIGHT SUPPORT]
+-- [ESP MODULE]
 local ESP_HOLDER = Instance.new("Folder", game.CoreGui)
 ESP_HOLDER.Name = "Core_ESP_v3"
 
 local function UpdateESP()
-    -- Check if ESP is disabled
     if not getgenv().CoreState.ESP then 
         ESP_HOLDER:ClearAllChildren()
         return 
@@ -540,13 +582,12 @@ local function UpdateESP()
                     espInstance = highlight
                 end
                 
-                -- Dynamic Color Logic (Target vs Normal)
                 if getgenv().CoreState.CamLock and getgenv().CoreState.CamLockTarget == player then
-                    espInstance.FillColor = Color3.fromRGB(0, 255, 100) -- GREEN FOR TARGET
+                    espInstance.FillColor = Color3.fromRGB(0, 255, 100)
                     espInstance.OutlineColor = Color3.fromRGB(255, 255, 255)
                     espInstance.FillTransparency = 0.3
                 else
-                    espInstance.FillColor = Color3.fromRGB(255, 0, 0) -- RED FOR OTHERS
+                    espInstance.FillColor = Color3.fromRGB(255, 0, 0) 
                     espInstance.OutlineColor = Color3.fromRGB(255, 255, 255)
                     espInstance.FillTransparency = 0.5
                 end
@@ -563,11 +604,67 @@ local function UpdateESP()
     end
 end
 
--- // KEYBIND LISTENER //
+-- // INPUT & M1 DETECTION FIX //
+local function RegisterAttack()
+    getgenv().CoreState.LastAttackTime = tick()
+end
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == getgenv().CoreState.CamLockKey then
+    -- FIX: Removed 'not gameProcessed' check for MouseButton1
+    -- This ensures we detect attacks even if the game engine processes the click first (common in fighting games)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        RegisterAttack()
+    end
+
+    if gameProcessed then if UserInputService:GetFocusedTextBox() then return end end
+    if getgenv().CoreState.CamLockKey and input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode == getgenv().CoreState.CamLockKey then
         ToggleCamLock()
+    end
+end)
+
+-- REDUNDANCY: Listener for Tool Activation (ensures mobile/controller attacks are caught)
+local function SetupToolListener(char)
+    if not char then return end
+    
+    local function BindTool(child)
+        if child:IsA("Tool") then
+            child.Activated:Connect(RegisterAttack)
+        end
+    end
+
+    char.ChildAdded:Connect(BindTool)
+    for _, child in ipairs(char:GetChildren()) do
+        BindTool(child)
+    end
+end
+
+Players.LocalPlayer.CharacterAdded:Connect(SetupToolListener)
+if Players.LocalPlayer.Character then SetupToolListener(Players.LocalPlayer.Character) end
+
+
+-- [FIX: GLOBAL BLUR CLEANER]
+local function ForceClearBlur()
+    local blur = Lighting:FindFirstChild("FluentAcrylicBlur")
+    if blur then
+        if not Window.Frame or not Window.Frame.Visible then
+            blur.Enabled = false
+        end
+    end
+    
+    local standardBlur = Lighting:FindFirstChild("Blur")
+    if standardBlur and standardBlur.Size > 0 then
+         if not Window.Frame or not Window.Frame.Visible then
+            standardBlur.Enabled = false
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(ForceClearBlur)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == LoaderConfig.Keybind and not gameProcessed then
+        task.wait() 
+        ForceClearBlur()
     end
 end)
 
@@ -580,27 +677,30 @@ local Tabs = {
 }
 
 local SectionCombat = Tabs.Combat:AddSection("Sistema de Defesa")
-SectionCombat:AddToggle("AutoBlock", {
-    Title = "Defesa 3-Camadas",
-    Description = "DB + Heurística + Hitbox Falsa.",
+
+SectionCombat:AddToggle("AutoBlockAll", {
+    Title = "AutoBlock: Zero Delay",
+    Description = "Defesa Instantânea (RenderStep Priority).",
     Default = false,
-    Callback = function(v) getgenv().CoreState.AutoBlock = v end
+    Callback = function(v) getgenv().CoreState.AutoBlockAll = v end
 })
 
-local SectionOffense = Tabs.Combat:AddSection("Ataque")
-SectionOffense:AddToggle("AutoAttack", {
-    Title = "Aura Legit",
-    Description = "Encara e ataca alvos no alcance.",
-    Default = false,
-    Callback = function(v) getgenv().CoreState.AutoAttack = v end
-})
+local SectionOffense = Tabs.Combat:AddSection("Ataque / Auxiliar")
+-- Aura Removed per Request
+
 SectionOffense:AddKeybind("CamLockKey", {
     Title = "Tecla CamLock (PC)",
     Mode = "Toggle",
     Default = "Q",
-    Callback = function(Value) getgenv().CoreState.CamLockKey = Value end,
-    ChangedCallback = function(New) getgenv().CoreState.CamLockKey = New end
+    Callback = function(Value) end,
+    ChangedCallback = function(New) 
+        if typeof(New) == "EnumItem" then
+            getgenv().CoreState.CamLockKey = New
+            Fluent:Notify({Title = "Config", Content = "Tecla CamLock: " .. tostring(New.Name), Duration = 2})
+        end
+    end
 })
+
 SectionOffense:AddSlider("CamSmoothness", {
     Title = "Suavidade da Câmera",
     Description = "Menor = Mais Móvel/Fluido.",
@@ -614,8 +714,8 @@ SectionOffense:AddSlider("CamHeight", {
     Title = "Altura da Câmera (Offset)",
     Description = "Ajusta altura da mira (Corrige visão reta).",
     Default = 1.8,
-    Min = -2,
-    Max = 6,
+    Min = -5, -- Allow negative values to look lower
+    Max = 10, -- Allow higher values to look from above
     Rounding = 1,
     Callback = function(v) getgenv().CoreState.CamLockYOffset = v end
 })
@@ -666,15 +766,15 @@ SectionMovement:AddSlider("JumpPower", {
     Callback = function(v) getgenv().CoreState.JumpPower = v end
 })
 
--- // MAIN LOOP //
-RunService.Heartbeat:Connect(function()
+-- // MAIN LOOP OPTIMIZATION (ZERO DELAY) //
+-- Replaced Heartbeat with BindToRenderStep (Priority: Character + 1) to ensure checks occur 
+-- IMMEDIATELY after animations update but BEFORE the frame is rendered. 
+-- This eliminates the ~16ms input latency associated with Heartbeat (post-physics).
+RunService:BindToRenderStep("DCI_CoreLoop", Enum.RenderPriority.Character.Value + 5, function()
     pcall(function()
         ProcessAutoBlock()
         ProcessAttackSpeed()
-        ProcessAutoAttack()
-        -- ProcessCamLock handled by RenderStepped
         UpdateESP() 
-        
         if getgenv().CoreState.SpeedHack then
             local char = Players.LocalPlayer.Character
             if char and char:FindFirstChild("Humanoid") then
@@ -695,7 +795,7 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 
 Window:SelectTab(1)
 Fluent:Notify({
-    Title = "Sistema Pronto",
-    Content = "Plataforma: " .. (LoaderConfig.IsMobile and "Mobile" or "PC"),
+    Title = "Sistema v3.7 (Input Fix)",
+    Content = "Protocolo de Latência Zero Ativado.",
     Duration = 5
 })
