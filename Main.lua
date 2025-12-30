@@ -1,10 +1,10 @@
 --!native
 --!optimize 2
 --[[
-    ROBLOX-CORE-COMPILER // DIAGNOSTIC COMMAND INTERFACE (GUI) b v3.7 (PT-BR)
+    ROBLOX-CORE-COMPILER // DIAGNOSTIC COMMAND INTERFACE (GUI) b v3.8 (PT-BR)
     TARGET: HEROES BATTLEGROUNDS
-    UPDATE: INPUT DETECTION FIX (M1 IGNORES GAMEPROCESSED)
-    NOTE: AGGRESSIVE ATTACK RECOGNITION ADDED
+    UPDATE: MAP CHANGE BLUR FIX (ANTI-BLUR ENFORCEMENT)
+    NOTE: AGGRESSIVE ATTACK RECOGNITION RETAINED
     STATUS: EXTREME OPTIMIZATION (O3)
 ]]
 
@@ -131,11 +131,11 @@ InitializeLoader()
 
 -- // MAIN INTERFACE CREATION //
 local WindowOptions = {
-    Title = "DCI (GUI) b v3.7 " .. (LoaderConfig.IsMobile and "[MOBILE]" or "[PC]"),
-    SubTitle = "Attack Detection Fix",
+    Title = "DCI (GUI) b v3.8 " .. (LoaderConfig.IsMobile and "[MOBILE]" or "[PC]"),
+    SubTitle = "Anti-Blur Optimized",
     TabWidth = 160,
     Size = LoaderConfig.IsMobile and UDim2.fromOffset(480, 320) or UDim2.fromOffset(580, 460),
-    Acrylic = not LoaderConfig.IsMobile, 
+    Acrylic = false, -- [CRITICAL FIX] Disabled to prevent map change blur artifacts
     Theme = "Dark",
     MinimizeKey = LoaderConfig.Keybind
 }
@@ -146,7 +146,7 @@ local Window = Fluent:CreateWindow(WindowOptions)
 getgenv().CoreState = {
     AutoBlockAll = false,      
     
-    LastAttackTime = 0, -- Replaces boolean toggle for better precision
+    LastAttackTime = 0, 
     
     AttackSpeed = false,
     AttackSpeedValue = 2.5,
@@ -354,11 +354,6 @@ if LoaderConfig.IsMobile then
         if not MainGUIReference then MainGUIReference = FindMainGUI() end
         if MainGUIReference then
             MainGUIReference.Enabled = not MainGUIReference.Enabled
-            -- [FIX: BLUR REMOVAL ON CLOSE]
-            if not MainGUIReference.Enabled then
-                local blur = Lighting:FindFirstChild("FluentAcrylicBlur")
-                if blur then blur.Enabled = false end
-            end
         else
             MainGUIReference = FindMainGUI()
             if MainGUIReference then MainGUIReference.Enabled = not MainGUIReference.Enabled else
@@ -371,24 +366,14 @@ end
 
 -- // DATABASE: KNOWN ATTACKS (EXTENDED) //
 local KNOWN_ATTACKS = {
-    -- [[ SET A (Combos Normais/M1) ]] --
     ["15322492552"] = true, ["15322493614"] = true, ["15322494803"] = true, ["15322496218"] = true,
-    -- [[ SET B ]] --
     ["16605699401"] = true, ["16605828199"] = true, ["16605774003"] = true, ["14989482371"] = true,
-    -- [[ SET C ]] --
     ["16146436596"] = true, ["16146437896"] = true, ["16146439328"] = true, ["16146440723"] = true,
-    -- [[ SET D ]] --
     ["18616154806"] = true, ["18616155940"] = true, ["18679858193"] = true, ["18679241274"] = true,
-    -- [[ SET E (Saitama) ]] --
     ["18833984494"] = true, ["18833986974"] = true, ["18833989817"] = true, ["18833991833"] = true,
-    
-    -- [[ SET F (IDs Longos/Novos) ]] --
     ["109118299683778"] = true, ["134710131702457"] = true, ["129007872635806"] = true, ["97193330603283"] = true,
-    -- [[ SET G (IDs Longos/Novos 2) ]] --
     ["71064390671639"] = true, ["113302934282694"] = true, ["103692467047605"] = true, ["118311121122152"] = true,
     ["110878031211717"] = true,
-    
-    -- [[ DASH ATTACKS (Priority Overrides) ]] --
     ["13917336710"] = true, ["15271714828"] = true, ["15271719973"] = true, ["15271729409"] = true,
     ["18619394783"] = true, ["18838849992"] = true,
 }
@@ -434,11 +419,9 @@ local function GetClosestPartDistance(character, rootPos)
 end
 
 local function ToggleBlock(state)
-    -- Prevent state flapping
     if isBlocking == state then return end
     isBlocking = state
     
-    -- VIM calls are instant; removed any potential throttle logic here to match '0 delay' requirement
     if state then
         VIM:SendKeyEvent(true, BLOCK_KEY, false, game)
     else
@@ -446,12 +429,8 @@ local function ToggleBlock(state)
     end
 end
 
--- [REFACTORED: AUTOBLOCK ONLY]
 local function ProcessAutoBlock()
     local state = getgenv().CoreState
-    
-    -- CRITICAL: IF MANUAL ATTACK DETECTED (WITHIN 0.8s), DISABLE BLOCK
-    -- This uses the timestamp instead of a potentially delayed task
     if (tick() - (state.LastAttackTime or 0)) < 0.8 then
         if isBlocking then ToggleBlock(false) end
         return
@@ -492,14 +471,12 @@ local function ProcessAutoBlock()
                         local alertArmed = false
                         local isDatabaseMatch = false 
                         
-                        -- METHOD 1: DATABASE
                         local id = GetCleanID(track)
                         if id and KNOWN_ATTACKS[id] then 
                             alertArmed = true 
                             isDatabaseMatch = true 
                         end
 
-                        -- METHOD 2: HEURISTIC
                         if not alertArmed then
                             local name = track.Name:lower()
                             local isWalkAnim = IGNORED_ANIMS[name] or name:find("walk") or name:find("run")
@@ -508,7 +485,6 @@ local function ProcessAutoBlock()
                             end
                         end
 
-                        -- METHOD 3: DASH/PROXIMITY
                         if not alertArmed then
                             local name = track.Name:lower()
                             if not IGNORED_ANIMS[name] then
@@ -535,7 +511,6 @@ local function ProcessAutoBlock()
         end
         if shouldBlock then break end
     end
-    
     ToggleBlock(shouldBlock)
 end
 
@@ -610,8 +585,6 @@ local function RegisterAttack()
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    -- FIX: Removed 'not gameProcessed' check for MouseButton1
-    -- This ensures we detect attacks even if the game engine processes the click first (common in fighting games)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         RegisterAttack()
     end
@@ -622,7 +595,6 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- REDUNDANCY: Listener for Tool Activation (ensures mobile/controller attacks are caught)
 local function SetupToolListener(char)
     if not char then return end
     
@@ -642,31 +614,36 @@ Players.LocalPlayer.CharacterAdded:Connect(SetupToolListener)
 if Players.LocalPlayer.Character then SetupToolListener(Players.LocalPlayer.Character) end
 
 
--- [FIX: GLOBAL BLUR CLEANER]
-local function ForceClearBlur()
-    local blur = Lighting:FindFirstChild("FluentAcrylicBlur")
-    if blur then
-        if not Window.Frame or not Window.Frame.Visible then
-            blur.Enabled = false
-        end
+-- [CRITICAL: AGGRESSIVE BLUR REMOVER]
+-- This function runs continuously to ensure NO blur exists in Lighting.
+-- This solves the "map change blur" issue by destroying the effect immediately.
+local function AggressiveBlurCleaner()
+    -- Target the specific library blur
+    local fluentBlur = Lighting:FindFirstChild("FluentAcrylicBlur")
+    if fluentBlur then 
+        fluentBlur:Destroy() 
     end
     
-    local standardBlur = Lighting:FindFirstChild("Blur")
-    if standardBlur and standardBlur.Size > 0 then
-         if not Window.Frame or not Window.Frame.Visible then
-            standardBlur.Enabled = false
+    -- Target generic Blurs that might be stuck (optional safeguard)
+    -- We assume any BlurEffect appearing during a map change while using this script is unwanted
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("BlurEffect") and (v.Name == "FluentAcrylicBlur" or v.Enabled == true) then
+            v.Enabled = false
+            v:Destroy()
         end
     end
 end
 
-RunService.RenderStepped:Connect(ForceClearBlur)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if input.KeyCode == LoaderConfig.Keybind and not gameProcessed then
-        task.wait() 
-        ForceClearBlur()
+-- Bind to Lighting changes to catch map updates instantly
+Lighting.ChildAdded:Connect(function(child)
+    if child:IsA("BlurEffect") or child.Name == "FluentAcrylicBlur" then
+        task.wait() -- yield microsecond to allow property set
+        child:Destroy()
     end
 end)
+
+-- Redundancy loop
+RunService.RenderStepped:Connect(AggressiveBlurCleaner)
 
 -- // UI CONSTRUCTION //
 local Tabs = {
@@ -686,7 +663,6 @@ SectionCombat:AddToggle("AutoBlockAll", {
 })
 
 local SectionOffense = Tabs.Combat:AddSection("Ataque / Auxiliar")
--- Aura Removed per Request
 
 SectionOffense:AddKeybind("CamLockKey", {
     Title = "Tecla CamLock (PC)",
@@ -714,8 +690,8 @@ SectionOffense:AddSlider("CamHeight", {
     Title = "Altura da Câmera (Offset)",
     Description = "Ajusta altura da mira (Corrige visão reta).",
     Default = 1.8,
-    Min = -5, -- Allow negative values to look lower
-    Max = 10, -- Allow higher values to look from above
+    Min = -5, 
+    Max = 10, 
     Rounding = 1,
     Callback = function(v) getgenv().CoreState.CamLockYOffset = v end
 })
@@ -767,9 +743,6 @@ SectionMovement:AddSlider("JumpPower", {
 })
 
 -- // MAIN LOOP OPTIMIZATION (ZERO DELAY) //
--- Replaced Heartbeat with BindToRenderStep (Priority: Character + 1) to ensure checks occur 
--- IMMEDIATELY after animations update but BEFORE the frame is rendered. 
--- This eliminates the ~16ms input latency associated with Heartbeat (post-physics).
 RunService:BindToRenderStep("DCI_CoreLoop", Enum.RenderPriority.Character.Value + 5, function()
     pcall(function()
         ProcessAutoBlock()
@@ -795,7 +768,7 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 
 Window:SelectTab(1)
 Fluent:Notify({
-    Title = "Sistema v3.7 (Input Fix)",
-    Content = "Protocolo de Latência Zero Ativado.",
+    Title = "Sistema v3.8 (Anti-Blur)",
+    Content = "Correção de Borrão em Mapa Ativada.",
     Duration = 5
 })
